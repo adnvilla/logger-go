@@ -1,0 +1,27 @@
+# Semantic Release workflow
+# Uses the reusable workflow from adnvilla/gha-toolkit
+# For more information see: https://github.com/adnvilla/gha-toolkit
+
+name: Release
+
+on:
+  workflow_run:
+    workflows: ["Go"]
+    types:
+      - completed
+    branches:
+      - master
+
+jobs:
+  semantic-release:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    uses: adnvilla/gha-toolkit/.github/workflows/release.yml@v1.1.0
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    with:
+      node-version: '20'
+      dry-run: false
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
