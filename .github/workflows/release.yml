@@ -15,7 +15,7 @@ on:
 jobs:
   semantic-release:
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
-    uses: adnvilla/gha-toolkit/.github/workflows/release.yml@v1.1.0
+    uses: adnvilla/gha-toolkit/.github/workflows/release.yml@v1.1.1
     permissions:
       contents: write
       issues: write

@@ -12,6 +12,6 @@ on:
 
 jobs:
   build-and-test:
-    uses: adnvilla/gha-toolkit/.github/workflows/go-base.yml@v1.1.0
+    uses: adnvilla/gha-toolkit/.github/workflows/go-base.yml@v1.1.1
     with:
       go-version: '1.24'
