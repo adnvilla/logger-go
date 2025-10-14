@@ -22,3 +22,8 @@ func FromContext(ctx context.Context) *slog.Logger {
 
 	return l
 }
+
+func With(ctx context.Context, args ...any) context.Context {
+	l := FromContext(ctx).With(args...)
+	return WithContext(ctx, l)
+}
