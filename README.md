@@ -78,7 +78,7 @@ func main() {
     ctx = logger.SetLogger(ctx, zap.NewHandler(zapLogger))
 
     logger.Info(ctx, "Hello, World!", "component", "demo")
-    logger.Debug(ctx, "Structured logging", "key", "value", "count", 123)
+    logger.Debug(ctx, "Hello, World!", "key", "value", "key2", 123)
 }
 ```
 
