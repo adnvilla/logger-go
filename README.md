@@ -89,5 +89,9 @@ Refer to [`examples/zap`](examples/zap/main.go) for a runnable program that mirr
 Run the tests with:
 
 ```bash
-go test ./...
+go test -race -cover ./...
 ```
+
+The integration suite verifies that production JSON remains newline-delimited and
+machine-parseable, while development console output preserves the same semantic
+fields without depending on timestamps, field order, or whitespace.

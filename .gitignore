@@ -24,5 +24,8 @@ go.work.sum
 # env file
 .env
 
+# macOS metadata
+.DS_Store
+
 # Graphify generated artifacts
 graphify-out/
