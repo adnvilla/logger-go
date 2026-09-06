@@ -12,17 +12,17 @@ func SetLogger(ctx context.Context, l slog.Handler) context.Context {
 }
 
 func Info(ctx context.Context, msg string, attrs ...any) {
-	FromContext(ctx).Info(msg, attrs...)
+	FromContext(ctx).InfoContext(ctx, msg, attrs...)
 }
 
 func Warn(ctx context.Context, msg string, attrs ...any) {
-	FromContext(ctx).Warn(msg, attrs...)
+	FromContext(ctx).WarnContext(ctx, msg, attrs...)
 }
 
 func Error(ctx context.Context, msg string, attrs ...any) {
-	FromContext(ctx).Error(msg, attrs...)
+	FromContext(ctx).ErrorContext(ctx, msg, attrs...)
 }
 
 func Debug(ctx context.Context, msg string, attrs ...any) {
-	FromContext(ctx).Debug(msg, attrs...)
+	FromContext(ctx).DebugContext(ctx, msg, attrs...)
 }

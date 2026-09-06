@@ -57,6 +57,21 @@ logger.Info(ctx, "handling request")
 
 Every log emitted with the derived context includes those attributes.
 
+The level helpers also forward the caller's context to the handler's `Enabled`
+and `Handle` methods, including when using the default logger. For request logs,
+pass the request context (or a context derived from it):
+
+```go
+ctx := logger.With(r.Context(), "request_id", reqID)
+logger.Info(ctx, "handling request")
+```
+
+A context-aware handler can use this context to extract trace/span IDs for
+log correlation. The standard JSON/text handlers and the included Zap bridge
+do not extract these values automatically. Cancellation does not by itself
+suppress logging, so failures and timeouts can still be recorded with their
+request context.
+
 ### Using the Zap handler
 
 The `zap` subpackage implements `slog.Handler`, which allows slog to write to Zap. This means you can continue using the familiar `zap.Logger` ecosystem while adopting `log/slog`.
