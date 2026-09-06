@@ -15,3 +15,4 @@ jobs:
     uses: adnvilla/gha-toolkit/.github/workflows/go-base.yml@v1.1.1
     with:
       go-version: '1.24'
+      test-flags: '-v -race -cover'

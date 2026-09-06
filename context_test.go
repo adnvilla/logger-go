@@ -1,7 +1,9 @@
 package logger
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"log/slog"
 	"testing"
 )
@@ -52,8 +54,8 @@ func TestFromContext(t *testing.T) {
 
 func TestWith(t *testing.T) {
 	ctx := context.Background()
-	handler := &mockHandler{}
-	logger := slog.New(handler)
+	var output bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&output, nil))
 	ctx = WithContext(ctx, logger)
 
 	// Add attributes to the logger
@@ -65,11 +67,10 @@ func TestWith(t *testing.T) {
 		t.Error("Expected a new logger instance with attributes")
 	}
 
-	// The With function should create a logger that adds attributes to all subsequent logs
-	// We test this by checking that the logger is different, which indicates it has pre-set attributes
-	if newLogger == nil {
-		t.Error("Expected new logger to not be nil")
-	}
+	Info(newCtx, "test message")
+	record := decodeJSONRecord(t, &output)
+	assertJSONField(t, record, "key1", "value1")
+	assertJSONField(t, record, "key2", float64(42))
 }
 
 func TestContextKey(t *testing.T) {
@@ -92,8 +93,8 @@ func TestContextKey(t *testing.T) {
 
 func TestMultipleContextOperations(t *testing.T) {
 	ctx := context.Background()
-	handler := &mockHandler{}
-	logger := slog.New(handler)
+	var output bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&output, nil))
 
 	// Set initial logger
 	ctx = WithContext(ctx, logger)
@@ -110,28 +111,30 @@ func TestMultipleContextOperations(t *testing.T) {
 		t.Error("Expected final logger to be different from original")
 	}
 
-	// Test that we can log successfully (detailed attribute testing is complex with slog)
 	Info(ctx, "test message", "additional", "attr")
+	record := decodeJSONRecord(t, &output)
+	assertJSONField(t, record, "msg", "test message")
+	assertJSONField(t, record, "service", "test")
+	assertJSONField(t, record, "version", "1.0")
+	assertJSONField(t, record, "request_id", "12345")
+	assertJSONField(t, record, "additional", "attr")
+}
 
-	if len(handler.records) != 1 {
-		t.Fatalf("Expected 1 log record, got %d", len(handler.records))
+func decodeJSONRecord(t *testing.T, output *bytes.Buffer) map[string]any {
+	t.Helper()
+
+	var record map[string]any
+	if err := json.NewDecoder(output).Decode(&record); err != nil {
+		t.Fatalf("decode JSON log record: %v", err)
 	}
 
-	record := handler.records[0]
-	if record.Message != "test message" {
-		t.Errorf("Expected message 'test message', got %q", record.Message)
-	}
+	return record
+}
 
-	// Check that at least the additional attribute is present
-	var foundAdditional bool
-	record.Attrs(func(a slog.Attr) bool {
-		if a.Key == "additional" && a.Value.Any() == "attr" {
-			foundAdditional = true
-		}
-		return true
-	})
+func assertJSONField(t *testing.T, record map[string]any, key string, want any) {
+	t.Helper()
 
-	if !foundAdditional {
-		t.Error("Expected to find additional=attr attribute")
+	if got := record[key]; got != want {
+		t.Errorf("field %q = %#v, want %#v", key, got, want)
 	}
 }
