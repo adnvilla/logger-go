@@ -1,0 +1,28 @@
+name: Apply backlog plan
+
+on:
+  push:
+    branches:
+      - cursor/phase-0-backlog-hygiene-1592
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  apply:
+    if: github.ref == 'refs/heads/cursor/phase-0-backlog-hygiene-1592' || github.head_ref == 'cursor/phase-0-backlog-hygiene-1592'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Apply Phase 0 hygiene and phase milestones
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python3 .github/scripts/apply-backlog-plan.py
