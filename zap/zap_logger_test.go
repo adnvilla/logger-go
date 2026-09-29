@@ -1,333 +1,367 @@
 package zap
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"io"
 	"log/slog"
+	"runtime"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"go.uber.org/zap/zaptest/observer"
 )
 
-func TestNewHandler(t *testing.T) {
-	logger := zap.NewNop()
-	handler := NewHandler(logger)
+// jsonLogger returns a zap.Logger that writes JSON to a buffer, and a func that
+// decodes every record written so far.
+func jsonLogger(t *testing.T, level zapcore.Level) (*zap.Logger, func() []map[string]any) {
+	t.Helper()
 
-	if handler == nil {
-		t.Error("Expected handler to be created")
+	var buf bytes.Buffer
+	cfg := zapcore.EncoderConfig{
+		TimeKey:        "ts",
+		LevelKey:       "level",
+		NameKey:        "logger",
+		CallerKey:      "caller",
+		MessageKey:     "msg",
+		StacktraceKey:  "stacktrace",
+		LineEnding:     zapcore.DefaultLineEnding,
+		EncodeLevel:    zapcore.LowercaseLevelEncoder,
+		EncodeTime:     zapcore.RFC3339NanoTimeEncoder,
+		EncodeDuration: zapcore.StringDurationEncoder,
+		EncodeCaller:   zapcore.FullCallerEncoder,
 	}
+	core := zapcore.NewCore(zapcore.NewJSONEncoder(cfg), zapcore.AddSync(&buf), level)
 
-	// Verify that it implements slog.Handler
-	var _ slog.Handler = handler
-}
-
-func TestZapHandler_Enabled(t *testing.T) {
-	core, _ := observer.New(zapcore.InfoLevel)
-	logger := zap.New(core)
-	handler := NewHandler(logger)
-
-	ctx := context.Background()
-
-	tests := []struct {
-		level    slog.Level
-		expected bool
-	}{
-		{slog.LevelDebug, false}, // Below InfoLevel
-		{slog.LevelInfo, true},   // At InfoLevel
-		{slog.LevelWarn, true},   // Above InfoLevel
-		{slog.LevelError, true},  // Above InfoLevel
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.level.String(), func(t *testing.T) {
-			if enabled := handler.Enabled(ctx, tt.level); enabled != tt.expected {
-				t.Errorf("Expected Enabled(%v) = %v, got %v", tt.level, tt.expected, enabled)
+	return zap.New(core), func() []map[string]any {
+		t.Helper()
+		var records []map[string]any
+		for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+			if line == "" {
+				continue
 			}
-		})
-	}
-}
-
-func TestZapHandler_Handle(t *testing.T) {
-	core, logs := observer.New(zapcore.DebugLevel)
-	logger := zap.New(core)
-	handler := NewHandler(logger)
-
-	ctx := context.Background()
-
-	tests := []struct {
-		level   slog.Level
-		message string
-	}{
-		{slog.LevelDebug, "debug message"},
-		{slog.LevelInfo, "info message"},
-		{slog.LevelWarn, "warn message"},
-		{slog.LevelError, "error message"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.level.String(), func(t *testing.T) {
-			record := slog.NewRecord(time.Now(), tt.level, tt.message, 0)
-			record.AddAttrs(slog.String("key1", "value1"), slog.Int("key2", 42))
-
-			err := handler.Handle(ctx, record)
-			if err != nil {
-				t.Errorf("Expected no error, got %v", err)
+			var record map[string]any
+			if err := json.Unmarshal([]byte(line), &record); err != nil {
+				t.Fatalf("decode %q: %v", line, err)
 			}
-
-			// Check that the log was recorded
-			entries := logs.All()
-			if len(entries) == 0 {
-				t.Error("Expected at least one log entry")
-				return
-			}
-
-			lastEntry := entries[len(entries)-1]
-			if lastEntry.Message != tt.message {
-				t.Errorf("Expected message %q, got %q", tt.message, lastEntry.Message)
-			}
-
-			// Check that attributes were included
-			if len(lastEntry.Context) < 2 {
-				t.Errorf("Expected at least 2 context fields, got %d", len(lastEntry.Context))
-			}
-		})
+			records = append(records, record)
+		}
+		return records
 	}
 }
 
-func TestZapHandler_HandleWithAttrs(t *testing.T) {
-	core, logs := observer.New(zapcore.DebugLevel)
-	logger := zap.New(core)
-	handler := NewHandler(logger)
+func onlyRecord(t *testing.T, records []map[string]any) map[string]any {
+	t.Helper()
+	if len(records) != 1 {
+		t.Fatalf("got %d records, want 1: %v", len(records), records)
+	}
+	return records[0]
+}
 
-	ctx := context.Background()
-	record := slog.NewRecord(time.Now(), slog.LevelInfo, "test message", 0)
-	record.AddAttrs(
-		slog.String("string_attr", "string_value"),
-		slog.Int("int_attr", 123),
-		slog.Bool("bool_attr", true),
+func assertJSON(t *testing.T, got any, want string) {
+	t.Helper()
+	var wantValue any
+	if err := json.Unmarshal([]byte(want), &wantValue); err != nil {
+		t.Fatalf("bad expectation %q: %v", want, err)
+	}
+	gotJSON, _ := json.Marshal(got)
+	wantJSON, _ := json.Marshal(wantValue)
+	if string(gotJSON) != string(wantJSON) {
+		t.Errorf("got %s, want %s", gotJSON, wantJSON)
+	}
+}
+
+func TestNewHandlerImplementsSlogHandler(t *testing.T) {
+	var _ slog.Handler = NewHandler(zap.NewNop())
+	var _ *ZapHandler = NewHandler(zap.NewNop()).(*ZapHandler)
+}
+
+func TestLevelsMapByRangeForEnabledAndHandle(t *testing.T) {
+	// Levels below Debug, between standard levels and above Error.
+	levels := []slog.Level{-8, slog.LevelDebug, -2, slog.LevelInfo, 2, slog.LevelWarn, 6, slog.LevelError, 12, 50}
+	mapped := func(l slog.Level) zapcore.Level {
+		switch {
+		case l >= slog.LevelError:
+			return zapcore.ErrorLevel
+		case l >= slog.LevelWarn:
+			return zapcore.WarnLevel
+		case l >= slog.LevelInfo:
+			return zapcore.InfoLevel
+		default:
+			return zapcore.DebugLevel
+		}
+	}
+
+	for _, threshold := range []zapcore.Level{zapcore.DebugLevel, zapcore.InfoLevel, zapcore.WarnLevel, zapcore.ErrorLevel} {
+		for _, level := range levels {
+			t.Run(threshold.String()+"/"+level.String(), func(t *testing.T) {
+				logger, records := jsonLogger(t, threshold)
+				h := NewHandler(logger, WithoutStacktrace())
+
+				want := mapped(level) >= threshold
+				if got := h.Enabled(context.Background(), level); got != want {
+					t.Fatalf("Enabled(%v) = %v, want %v", level, got, want)
+				}
+
+				// A record accepted by Enabled must be emitted, at the same level.
+				slog.New(h).Log(context.Background(), level, "msg")
+				got := records()
+				if !want {
+					if len(got) != 0 {
+						t.Fatalf("disabled level emitted %v", got)
+					}
+					return
+				}
+				if lvl := onlyRecord(t, got)["level"]; lvl != mapped(level).String() {
+					t.Errorf("level = %v, want %v", lvl, mapped(level))
+				}
+			})
+		}
+	}
+}
+
+func TestAttributeKinds(t *testing.T) {
+	logger, records := jsonLogger(t, zapcore.DebugLevel)
+	at := time.Date(2001, 2, 3, 4, 5, 6, 0, time.UTC)
+
+	slog.New(NewHandler(logger)).Info("kinds",
+		slog.String("s", "v"),
+		slog.Int("i", -1),
+		slog.Uint64("u", 2),
+		slog.Float64("f", 1.5),
+		slog.Bool("b", true),
+		slog.Duration("d", time.Second),
+		slog.Time("t", at),
+		slog.Any("m", map[string]int{"k": 1}),
 	)
 
-	err := handler.Handle(ctx, record)
-	if err != nil {
-		t.Errorf("Expected no error, got %v", err)
-	}
-
-	entries := logs.All()
-	if len(entries) != 1 {
-		t.Fatalf("Expected 1 log entry, got %d", len(entries))
-	}
-
-	entry := entries[0]
-	if entry.Message != "test message" {
-		t.Errorf("Expected message 'test message', got %q", entry.Message)
-	}
-
-	// Check that all attributes are present
-	expectedFields := map[string]struct {
-		stringVal string
-		intVal    int64
-		boolVal   bool
-		fieldType zapcore.FieldType
-	}{
-		"string_attr": {stringVal: "string_value", fieldType: zapcore.StringType},
-		"int_attr":    {intVal: 123, fieldType: zapcore.Int64Type},
-		"bool_attr":   {boolVal: true, fieldType: zapcore.BoolType},
-	}
-
-	foundFields := 0
-	for _, field := range entry.Context {
-		if expected, exists := expectedFields[field.Key]; exists {
-			foundFields++
-			switch expected.fieldType {
-			case zapcore.StringType:
-				if field.String != expected.stringVal {
-					t.Errorf("Expected field %s=%s, got %s", field.Key, expected.stringVal, field.String)
-				}
-			case zapcore.Int64Type:
-				if field.Integer != expected.intVal {
-					t.Errorf("Expected field %s=%d, got %d", field.Key, expected.intVal, field.Integer)
-				}
-			case zapcore.BoolType:
-				expectedInt := int64(0)
-				if expected.boolVal {
-					expectedInt = 1
-				}
-				if field.Integer != expectedInt {
-					t.Errorf("Expected field %s=%t (as %d), got %d", field.Key, expected.boolVal, expectedInt, field.Integer)
-				}
-			}
-		}
-	}
-
-	if foundFields != len(expectedFields) {
-		t.Errorf("Expected to find %d fields, found %d", len(expectedFields), foundFields)
-	}
+	r := onlyRecord(t, records())
+	assertJSON(t, []any{r["s"], r["i"], r["u"], r["f"], r["b"], r["d"], r["t"], r["m"]},
+		`["v", -1, 2, 1.5, true, "1s", "2001-02-03T04:05:06Z", {"k": 1}]`)
 }
 
-func TestZapHandler_WithAttrs(t *testing.T) {
-	core, logs := observer.New(zapcore.DebugLevel)
-	logger := zap.New(core)
-	handler := NewHandler(logger)
+func TestLoggerNameAndPreboundFieldsAreKept(t *testing.T) {
+	logger, records := jsonLogger(t, zapcore.DebugLevel)
+	logger = logger.Named("checkout").With(zap.String("service", "api"))
 
-	attrs := []slog.Attr{
-		slog.String("service", "test"),
-		slog.String("version", "1.0"),
-	}
+	slog.New(NewHandler(logger)).With("version", "1.0").Info("ready")
 
-	newHandler := handler.WithAttrs(attrs)
-	if newHandler == handler {
-		t.Error("Expected a new handler instance")
-	}
-
-	// Test that the new handler includes the attributes
-	ctx := context.Background()
-	record := slog.NewRecord(time.Now(), slog.LevelInfo, "test message", 0)
-
-	err := newHandler.Handle(ctx, record)
-	if err != nil {
-		t.Errorf("Expected no error, got %v", err)
-	}
-
-	entries := logs.All()
-	if len(entries) != 1 {
-		t.Fatalf("Expected 1 log entry, got %d", len(entries))
-	}
-
-	entry := entries[0]
-
-	// Check that the pre-set attributes are present
-	foundService := false
-	foundVersion := false
-	for _, field := range entry.Context {
-		if field.Key == "service" && field.String == "test" {
-			foundService = true
-		}
-		if field.Key == "version" && field.String == "1.0" {
-			foundVersion = true
-		}
-	}
-
-	if !foundService {
-		t.Error("Expected to find 'service' attribute")
-	}
-	if !foundVersion {
-		t.Error("Expected to find 'version' attribute")
-	}
+	r := onlyRecord(t, records())
+	assertJSON(t, []any{r["logger"], r["service"], r["version"]}, `["checkout", "api", "1.0"]`)
 }
 
-func TestZapHandler_WithGroup(t *testing.T) {
-	core, logs := observer.New(zapcore.DebugLevel)
-	logger := zap.New(core)
-	handler := NewHandler(logger)
-
-	groupedHandler := handler.WithGroup("mygroup")
-	if groupedHandler == handler {
-		t.Error("Expected a new handler instance")
-	}
-
-	// Test that the grouped handler works
-	ctx := context.Background()
-	record := slog.NewRecord(time.Now(), slog.LevelInfo, "test message", 0)
-
-	err := groupedHandler.Handle(ctx, record)
-	if err != nil {
-		t.Errorf("Expected no error, got %v", err)
-	}
-
-	entries := logs.All()
-	if len(entries) != 1 {
-		t.Fatalf("Expected 1 log entry, got %d", len(entries))
-	}
-
-	entry := entries[0]
-	if entry.LoggerName != "mygroup" {
-		t.Errorf("Expected logger name 'mygroup', got %q", entry.LoggerName)
-	}
-}
-
-func TestConvertSlogLevel(t *testing.T) {
+func TestGroupsAndAttributes(t *testing.T) {
 	tests := []struct {
-		slogLevel slog.Level
-		zapLevel  zapcore.Level
+		name string
+		log  func(*slog.Logger)
+		key  string
+		want string
 	}{
-		{slog.LevelDebug, zapcore.DebugLevel},
-		{slog.LevelInfo, zapcore.InfoLevel},
-		{slog.LevelWarn, zapcore.WarnLevel},
-		{slog.LevelError, zapcore.ErrorLevel},
-		{slog.Level(100), zapcore.ErrorLevel}, // High level should map to Error
+		{
+			name: "WithGroup nests later attributes",
+			log:  func(l *slog.Logger) { l.WithGroup("request").Info("m", "id", 7, "path", "/x") },
+			key:  "request",
+			want: `{"id": 7, "path": "/x"}`,
+		},
+		{
+			name: "WithGroup then With nests bound attributes",
+			log:  func(l *slog.Logger) { l.WithGroup("request").With("id", 7).Info("m", "path", "/x") },
+			key:  "request",
+			want: `{"id": 7, "path": "/x"}`,
+		},
+		{
+			name: "nested slog.Group",
+			log: func(l *slog.Logger) {
+				l.Info("m", slog.Group("http", slog.Int("status", 200), slog.Group("req", slog.String("method", "GET"))))
+			},
+			key:  "http",
+			want: `{"status": 200, "req": {"method": "GET"}}`,
+		},
+		{
+			name: "sibling groups from one parent stay independent",
+			log: func(l *slog.Logger) {
+				parent := l.WithGroup("a").WithGroup("b").WithGroup("c")
+				x := parent.WithGroup("x")
+				_ = parent.WithGroup("y")
+				x.Info("m", "k", 1)
+			},
+			key:  "a",
+			want: `{"b": {"c": {"x": {"k": 1}}}}`,
+		},
 	}
-
 	for _, tt := range tests {
-		t.Run(tt.slogLevel.String(), func(t *testing.T) {
-			zapLevel := convertSlogLevel(tt.slogLevel)
-			if zapLevel != tt.zapLevel {
-				t.Errorf("Expected convertSlogLevel(%v) = %v, got %v", tt.slogLevel, tt.zapLevel, zapLevel)
+		t.Run(tt.name, func(t *testing.T) {
+			logger, records := jsonLogger(t, zapcore.DebugLevel)
+			tt.log(slog.New(NewHandler(logger)))
+
+			r := onlyRecord(t, records())
+			assertJSON(t, r[tt.key], tt.want)
+			if name, ok := r["logger"]; ok {
+				t.Errorf("groups must not set the logger name, got %v", name)
 			}
 		})
 	}
 }
 
-func TestZapHandler_HandleDefaultLevel(t *testing.T) {
-	core, logs := observer.New(zapcore.DebugLevel)
-	logger := zap.New(core)
-	handler := NewHandler(logger)
-
-	ctx := context.Background()
-
-	// Test with a custom level that doesn't match standard levels
-	customLevel := slog.Level(50) // Between Info and Warn
-	record := slog.NewRecord(time.Now(), customLevel, "custom level message", 0)
-
-	err := handler.Handle(ctx, record)
-	if err != nil {
-		t.Errorf("Expected no error, got %v", err)
+func TestEmptyGroupsAndAttributesFollowSlogRules(t *testing.T) {
+	tests := []struct {
+		name string
+		log  func(*slog.Logger)
+		want string
+	}{
+		{"WithGroup(\"\") is a no-op", func(l *slog.Logger) { l.WithGroup("").Info("m", "k", "v") }, `{"k": "v"}`},
+		{"empty-key group is inlined", func(l *slog.Logger) { l.Info("m", slog.Group("", slog.Int("a", 1))) }, `{"a": 1}`},
+		{"named empty group is omitted", func(l *slog.Logger) { l.Info("m", slog.Group("empty"), "k", "v") }, `{"k": "v"}`},
+		{"empty Attr is ignored", func(l *slog.Logger) { l.Info("m", slog.Attr{}, "k", "v") }, `{"k": "v"}`},
+		{"WithGroup without attributes adds nothing", func(l *slog.Logger) { l.WithGroup("g").Info("m") }, `{}`},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logger, records := jsonLogger(t, zapcore.DebugLevel)
+			tt.log(slog.New(NewHandler(logger, WithCaller(false))))
 
-	entries := logs.All()
-	if len(entries) != 1 {
-		t.Fatalf("Expected 1 log entry, got %d", len(entries))
-	}
-
-	entry := entries[0]
-	if entry.Message != "custom level message" {
-		t.Errorf("Expected message 'custom level message', got %q", entry.Message)
-	}
-
-	// Custom levels should default to Info level in Zap
-	if entry.Level != zapcore.InfoLevel {
-		t.Errorf("Expected zap level Info for custom slog level, got %v", entry.Level)
+			r := onlyRecord(t, records())
+			for _, key := range []string{"level", "ts", "msg"} {
+				delete(r, key)
+			}
+			assertJSON(t, r, tt.want)
+		})
 	}
 }
 
-func TestZapHandler_Interface(t *testing.T) {
-	// Test that ZapHandler implements slog.Handler interface
-	logger := zap.NewNop()
-	handler := NewHandler(logger)
+type secret string
 
-	// This should compile without errors
-	var _ slog.Handler = handler
+func (secret) LogValue() slog.Value { return slog.StringValue("[REDACTED]") }
 
-	// Test all required methods exist and can be called
+type user struct{ id, token string }
+
+func (u user) LogValue() slog.Value {
+	return slog.GroupValue(slog.String("id", u.id), slog.Any("token", secret(u.token)))
+}
+
+func TestLogValuerIsResolved(t *testing.T) {
+	logger, records := jsonLogger(t, zapcore.DebugLevel)
+
+	slog.New(NewHandler(logger)).With("password", secret("hunter2")).Info("login", "user", user{"u1", "t0k3n"})
+
+	r := onlyRecord(t, records())
+	assertJSON(t, []any{r["password"], r["user"]}, `["[REDACTED]", {"id": "u1", "token": "[REDACTED]"}]`)
+	if raw, _ := json.Marshal(r); strings.Contains(string(raw), "hunter2") || strings.Contains(string(raw), "t0k3n") {
+		t.Errorf("secret leaked: %s", raw)
+	}
+}
+
+func TestRecordTimeIsPreserved(t *testing.T) {
+	logger, records := jsonLogger(t, zapcore.DebugLevel)
+	h := NewHandler(logger)
+	at := time.Date(2001, 2, 3, 4, 5, 6, 7, time.UTC)
+
+	if err := h.Handle(context.Background(), slog.NewRecord(at, slog.LevelInfo, "old", 0)); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Handle(context.Background(), slog.NewRecord(time.Time{}, slog.LevelInfo, "zero", 0)); err != nil {
+		t.Fatal(err)
+	}
+
+	got := records()
+	if len(got) != 2 {
+		t.Fatalf("got %d records, want 2", len(got))
+	}
+	if got[0]["ts"] != "2001-02-03T04:05:06.000000007Z" {
+		t.Errorf("ts = %v, want the record time", got[0]["ts"])
+	}
+	if ts, ok := got[1]["ts"]; ok {
+		t.Errorf("zero record time must be omitted, got ts = %v", ts)
+	}
+}
+
+func TestCallerComesFromTheRecord(t *testing.T) {
+	t.Run("direct slog call", func(t *testing.T) {
+		logger, records := jsonLogger(t, zapcore.DebugLevel)
+		l := slog.New(NewHandler(logger))
+
+		_, file, line, _ := runtime.Caller(0)
+		l.Info("here") // must be reported as this line
+
+		want := file + ":" + strconv.Itoa(line+1)
+		if got := onlyRecord(t, records())["caller"]; got != want {
+			t.Errorf("caller = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("zero PC has no caller", func(t *testing.T) {
+		logger, records := jsonLogger(t, zapcore.DebugLevel)
+		_ = NewHandler(logger).Handle(context.Background(), slog.NewRecord(time.Now(), slog.LevelInfo, "m", 0))
+		if got, ok := onlyRecord(t, records())["caller"]; ok {
+			t.Errorf("caller = %v, want none", got)
+		}
+	})
+
+	t.Run("WithCaller(false)", func(t *testing.T) {
+		logger, records := jsonLogger(t, zapcore.DebugLevel)
+		slog.New(NewHandler(logger, WithCaller(false))).Info("m")
+		if got, ok := onlyRecord(t, records())["caller"]; ok {
+			t.Errorf("caller = %v, want none", got)
+		}
+	})
+}
+
+func TestStacktraceOptions(t *testing.T) {
+	tests := []struct {
+		name      string
+		opts      []Option
+		level     slog.Level
+		wantStack bool
+	}{
+		{"default at Error", nil, slog.LevelError, true},
+		{"default not at Warn", nil, slog.LevelWarn, false},
+		{"WithStacktraceAt(Warn)", []Option{WithStacktraceAt(slog.LevelWarn)}, slog.LevelWarn, true},
+		{"WithoutStacktrace", []Option{WithoutStacktrace()}, slog.LevelError, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logger, records := jsonLogger(t, zapcore.DebugLevel)
+			slog.New(NewHandler(logger, tt.opts...)).Log(context.Background(), tt.level, "m")
+
+			_, hasStack := onlyRecord(t, records())["stacktrace"]
+			if hasStack != tt.wantStack {
+				t.Errorf("stacktrace present = %v, want %v", hasStack, tt.wantStack)
+			}
+		})
+	}
+}
+
+func discardLogger(level zapcore.Level) *zap.Logger {
+	enc := zapcore.NewJSONEncoder(zap.NewProductionEncoderConfig())
+	return zap.New(zapcore.NewCore(enc, zapcore.AddSync(io.Discard), level))
+}
+
+func benchmarkHandler(b *testing.B, l *slog.Logger, level slog.Level) {
+	b.ReportAllocs()
 	ctx := context.Background()
-
-	if !handler.Enabled(ctx, slog.LevelInfo) {
-		// This test depends on the logger configuration
+	for i := 0; i < b.N; i++ {
+		l.Log(ctx, level, "msg", "a", 1, "b", "x", slog.Group("g", slog.Int("c", 2)))
 	}
+}
 
-	record := slog.NewRecord(time.Now(), slog.LevelInfo, "test", 0)
-	if err := handler.Handle(ctx, record); err != nil {
-		t.Errorf("Handle returned error: %v", err)
-	}
+func BenchmarkHandlerEnabled(b *testing.B) {
+	benchmarkHandler(b, slog.New(NewHandler(discardLogger(zapcore.DebugLevel), WithCaller(false))), slog.LevelInfo)
+}
 
-	newHandler := handler.WithAttrs([]slog.Attr{slog.String("key", "value")})
-	if newHandler == nil {
-		t.Error("WithAttrs returned nil")
-	}
+func BenchmarkHandlerEnabledWithCaller(b *testing.B) {
+	benchmarkHandler(b, slog.New(NewHandler(discardLogger(zapcore.DebugLevel))), slog.LevelInfo)
+}
 
-	groupHandler := handler.WithGroup("group")
-	if groupHandler == nil {
-		t.Error("WithGroup returned nil")
-	}
+func BenchmarkHandlerDisabled(b *testing.B) {
+	benchmarkHandler(b, slog.New(NewHandler(discardLogger(zapcore.InfoLevel))), slog.LevelDebug)
+}
+
+func BenchmarkHandlerWithAttrs(b *testing.B) {
+	l := slog.New(NewHandler(discardLogger(zapcore.DebugLevel), WithCaller(false))).
+		With("svc", "api", "env", "prod", "ver", "1.2.3", "region", "us")
+	benchmarkHandler(b, l, slog.LevelInfo)
 }
