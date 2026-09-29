@@ -3,7 +3,7 @@ module github.com/adnvilla/logger-go/otel
 go 1.22
 
 require (
-	github.com/adnvilla/logger-go v1.2.0
+	github.com/adnvilla/logger-go v1.3.0
 	go.opentelemetry.io/otel/trace v1.28.0
 )
 

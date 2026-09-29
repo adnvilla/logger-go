@@ -3,7 +3,7 @@ module github.com/adnvilla/logger-go/zap
 go 1.22
 
 require (
-	github.com/adnvilla/logger-go v1.2.0
+	github.com/adnvilla/logger-go v1.3.0
 	go.uber.org/zap v1.27.0
 	go.uber.org/zap/exp v0.3.0
 )

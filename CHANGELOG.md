@@ -1,3 +1,13 @@
+## [1.3.0](https://github.com/adnvilla/logger-go/compare/v1.2.0...v1.3.0) (2026-09-29)
+
+### Features
+
+* add NewProduction to emit the production schema ([#47](https://github.com/adnvilla/logger-go/issues/47)) ([e1782a5](https://github.com/adnvilla/logger-go/commit/e1782a53ba2963fd747e4607b9320be63044f179)), closes [#27](https://github.com/adnvilla/logger-go/issues/27) [#11](https://github.com/adnvilla/logger-go/issues/11)
+* define the production log schema ([#43](https://github.com/adnvilla/logger-go/issues/43)) ([7a0acbc](https://github.com/adnvilla/logger-go/commit/7a0acbccb423bcfe7751d5b138a00c383c6bc36a)), closes [#11](https://github.com/adnvilla/logger-go/issues/11)
+* **otel:** correlate logs with OpenTelemetry traces ([#46](https://github.com/adnvilla/logger-go/issues/46)) ([642833c](https://github.com/adnvilla/logger-go/commit/642833c8701350f6bfece80c68c614fee115ea61)), closes [#24](https://github.com/adnvilla/logger-go/issues/24)
+* redact sensitive attributes in a handler middleware ([#45](https://github.com/adnvilla/logger-go/issues/45)) ([88f1bcd](https://github.com/adnvilla/logger-go/commit/88f1bcdb587cef262b448a00acc78d1f071024dd)), closes [#25](https://github.com/adnvilla/logger-go/issues/25)
+* serialize errors following the production schema ([#44](https://github.com/adnvilla/logger-go/issues/44)) ([80083db](https://github.com/adnvilla/logger-go/commit/80083db394124706272875230a1672723a43fb09)), closes [#26](https://github.com/adnvilla/logger-go/issues/26)
+
 ## [1.2.0](https://github.com/adnvilla/logger-go/compare/v1.1.0...v1.2.0) (2026-09-29)
 
 ### Features
