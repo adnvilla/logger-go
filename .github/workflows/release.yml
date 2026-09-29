@@ -1,6 +1,11 @@
 # Semantic Release workflow
 # Uses the reusable workflow from adnvilla/gha-toolkit
 # For more information see: https://github.com/adnvilla/gha-toolkit
+#
+# One release per phase: phase work is merged into master through a single
+# phase PR (phase-N/main -> master) that carries the phase milestone. After
+# semantic-release publishes, the release is renamed after that milestone.
+# See docs/RELEASING.md.
 
 name: Release
 
@@ -14,7 +19,7 @@ on:
 
 jobs:
   semantic-release:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' }}
     uses: adnvilla/gha-toolkit/.github/workflows/release.yml@v1.1.1
     permissions:
       contents: write
@@ -25,3 +30,60 @@ jobs:
       dry-run: false
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  label-phase-release:
+    needs: semantic-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
+      issues: read
+    steps:
+      - name: Name the release after the phase milestone
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const run = context.payload.workflow_run;
+            const sha = run.head_sha;
+
+            const { data: prs } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+              owner, repo, commit_sha: sha,
+            });
+            const pr = prs.find((p) => p.merged_at && p.base.ref === 'master' && p.milestone);
+            if (!pr) {
+              core.info(`No merged phase PR with a milestone for ${sha}; leaving release names unchanged.`);
+              return;
+            }
+
+            // semantic-release tags the CHANGELOG commit it pushes on top of the
+            // merged commit, so the release belongs to this run when its tag is
+            // that commit or a direct child of it.
+            const { data: releases } = await github.rest.repos.listReleases({ owner, repo, per_page: 10 });
+            let release;
+            for (const candidate of releases) {
+              const { data: commit } = await github.rest.repos.getCommit({ owner, repo, ref: candidate.tag_name });
+              if (commit.sha === sha || commit.parents.some((p) => p.sha === sha)) {
+                release = candidate;
+                break;
+              }
+            }
+            if (!release) {
+              core.info('No release was published for this merge (no releasable commits).');
+              return;
+            }
+
+            const milestone = pr.milestone;
+            if (release.name && release.name.includes(milestone.title)) {
+              core.info(`Release ${release.tag_name} is already named after ${milestone.title}.`);
+              return;
+            }
+
+            const header = `> **${milestone.title}** — milestone: ${milestone.html_url} · phase PR: #${pr.number}\n\n`;
+            await github.rest.repos.updateRelease({
+              owner, repo,
+              release_id: release.id,
+              name: `${release.tag_name} — ${milestone.title}`,
+              body: header + (release.body || ''),
+            });
+            core.info(`Renamed ${release.tag_name} after ${milestone.title}.`);
