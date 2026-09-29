@@ -412,3 +412,18 @@ func TestRedactionThroughTheBridge(t *testing.T) {
 	r := onlyRecord(t, records())
 	assertJSON(t, []any{r["token"], r["req"]}, `["[REDACTED]", {"authorization": "[REDACTED]", "path": "/login"}]`)
 }
+
+func TestProductionWithTheBridge(t *testing.T) {
+	zapLogger, records := jsonLogger(t, zapcore.DebugLevel)
+	l := logger.NewProduction(logger.Config{
+		ServiceName: "navi-api",
+		Handler:     NewHandler(zapLogger, WithCaller(false), WithoutStacktrace()),
+	})
+	ctx := logger.WithAttrs(context.Background(), slog.String(logger.KeyRequestID, "r1"))
+
+	l.WithGroup("db").ErrorContext(ctx, "failed", "error", errors.New("boom"), "password", "p")
+
+	r := onlyRecord(t, records())
+	assertJSON(t, []any{r["service.name"], r["request_id"], r["db"]},
+		`["navi-api", "r1", {"error.type": "*errors.errorString", "error.message": "boom", "password": "[REDACTED]"}]`)
+}

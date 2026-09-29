@@ -89,3 +89,20 @@ func BenchmarkTraceHandler(b *testing.B) {
 		l.InfoContext(ctx, "msg", "a", 1)
 	}
 }
+
+func TestProductionTracedRequest(t *testing.T) {
+	var buf bytes.Buffer
+	l := logger.NewProduction(logger.Config{
+		ServiceName: "navi-api",
+		Output:      &buf,
+		Extractors:  []logger.ContextExtractor{loggerotel.SpanContext},
+	})
+	ctx := trace.ContextWithSpanContext(context.Background(), spanContext(t, true))
+	ctx = logger.WithAttrs(ctx, slog.String(logger.KeyRequestID, "r1"))
+
+	l.InfoContext(ctx, "http request completed", slog.Int(logger.KeyHTTPResponseStatusCode, 200))
+
+	mustJSON(t, records(t, &buf), `[{"level":"INFO","msg":"http request completed","service.name":"navi-api",
+		"trace_id":"4bf92f3577b34da6a3ce929d0e0e4736","span_id":"00f067aa0ba902b7","trace_flags":"01",
+		"request_id":"r1","http.response.status_code":200}]`)
+}

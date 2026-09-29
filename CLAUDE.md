@@ -19,6 +19,9 @@ This is a Go library (`github.com/adnvilla/logger-go`) that wraps `log/slog` wit
 
 - **`context.go`** — Stores/retrieves `*slog.Logger` in `context.Context` using a private key. `FromContext` never returns nil (falls back to `slog.Default()`); nil contexts are treated as `context.Background()`; `WithContext(ctx, nil)` is a no-op. `With` creates a child logger with extra attributes.
 - **`attrs.go`** — `WithAttrs`/`AttrsFromContext` carry request-scoped `slog.Attr`s in the context; `NewContextHandler(next)` adds them to every record at the top level (replaying `WithGroup`/`WithAttrs` on a pre-group handler when groups are open).
+- **`schema.go`** — `SchemaVersion` and `Key*` constants of the production schema (`docs/schema.md`, OpenTelemetry names); `TestSchemaDocumentsEveryKey` keeps them in sync with the doc.
+- **`errors.go` / `redact.go`** — `NewErrorHandler` (`error.type`/`error.message`, optional `exception.stacktrace`) and `NewRedactHandler` (`[REDACTED]` for sensitive keys at any depth).
+- **`production.go`** — `NewProduction(Config)` composes context → redact → errors → JSON (or `Config.Handler`) and binds `service.*`; golden file `testdata/production.golden.json` (`go test -run TestProductionGolden -update .` to regenerate).
 - **`logger.go`** — Level helpers (`Info`, `Warn`, `Error`, `Debug`) extract the logger from context and delegate to it. `SetLogger` is deprecated (ADR 0002): use `slog.SetDefault` + `WithContext`.
 
 ### `zap/` module (`github.com/adnvilla/logger-go/zap`)
