@@ -379,3 +379,14 @@ func TestCallerThroughLoggerHelpers(t *testing.T) {
 		t.Errorf("caller = %v, want %v", got, want)
 	}
 }
+
+func TestContextAttributesThroughTheBridge(t *testing.T) {
+	zapLogger, records := jsonLogger(t, zapcore.DebugLevel)
+	l := slog.New(logger.NewContextHandler(NewHandler(zapLogger, WithCaller(false))))
+	ctx := logger.WithAttrs(context.Background(), slog.String("request_id", "r1"))
+
+	l.WithGroup("db").InfoContext(ctx, "query", "rows", 3)
+
+	r := onlyRecord(t, records())
+	assertJSON(t, []any{r["request_id"], r["db"]}, `["r1", {"rows": 3}]`)
+}

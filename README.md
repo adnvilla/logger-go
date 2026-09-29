@@ -57,6 +57,30 @@ treated as `context.Background()`, as in `log/slog`.
 process-wide default with context storage. See
 [ADR 0002](docs/adr/0002-context-and-default-logger.md).
 
+### Request-scoped attributes in the context (recommended)
+
+Put request data in the context as attributes, and wrap your handler once with
+`logger.NewContextHandler`. Every record logged with that context gets the
+attributes, whether it comes from the level helpers, from plain
+`slog.InfoContext`, or from any backend (including the Zap bridge):
+
+```go
+l := slog.New(logger.NewContextHandler(slog.NewJSONHandler(os.Stdout, nil)))
+slog.SetDefault(l)
+
+// In the HTTP middleware:
+ctx := logger.WithAttrs(r.Context(), slog.String("request_id", reqID))
+
+slog.InfoContext(ctx, "handling request")            // includes request_id
+l.WithGroup("db").InfoContext(ctx, "query", "rows", 3)
+// {"msg":"query","request_id":"...","db":{"rows":3}}
+```
+
+Context attributes are emitted at the top level, before the record's own
+attributes, even when groups are open, so correlation fields keep a stable path.
+They are not de-duplicated against attributes with the same key. See
+[ADR 0002](docs/adr/0002-context-and-default-logger.md).
+
 ### Adding request scoped attributes
 
 Use `logger.With` to enrich the context with attributes. The function returns a new context containing a child logger.
