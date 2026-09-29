@@ -41,16 +41,21 @@ import (
 )
 
 func main() {
-    ctx := context.Background()
+    l := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+    slog.SetDefault(l) // process-wide configuration, once at startup
 
-    // Attach slog's default text handler to the context.
-    ctx = logger.SetLogger(ctx, slog.NewTextHandler(os.Stdout, nil))
-
+    ctx := logger.WithContext(context.Background(), l)
     logger.Info(ctx, "Hello from logger-go", "version", "v1")
 }
 ```
 
-The logger helpers expect the `context.Context` used during `SetLogger`. If no logger is found on the context, the helpers fall back to `slog.Default()`.
+The helpers use the logger carried by the context. If there is none, they fall
+back to `slog.Default()`. `FromContext` never returns nil, and a nil context is
+treated as `context.Background()`, as in `log/slog`.
+
+`logger.SetLogger(ctx, handler)` still works but is deprecated: it mixes the
+process-wide default with context storage. See
+[ADR 0002](docs/adr/0002-context-and-default-logger.md).
 
 ### Adding request scoped attributes
 
@@ -85,6 +90,7 @@ The `zap` module (`github.com/adnvilla/logger-go/zap`) implements `slog.Handler`
 ```go
 import (
     "context"
+    "log/slog"
 
     "github.com/adnvilla/logger-go"
     "github.com/adnvilla/logger-go/zap"
@@ -96,7 +102,9 @@ func main() {
     ctx := context.Background()
 
     zapLogger, _ := zaplib.NewDevelopment()
-    ctx = logger.SetLogger(ctx, zap.NewHandler(zapLogger))
+    l := slog.New(zap.NewHandler(zapLogger))
+    slog.SetDefault(l)
+    ctx = logger.WithContext(ctx, l)
 
     logger.Info(ctx, "Hello, World!", "component", "demo")
     logger.Debug(ctx, "Hello, World!", "key", "value", "key2", 123)
