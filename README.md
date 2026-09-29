@@ -15,11 +15,17 @@ It keeps a logger inside a `context.Context`, exposes convenience helpers for th
 go get github.com/adnvilla/logger-go
 ```
 
-If you plan to use the Zap handler, also pull in Zap:
+The core module has no third-party dependencies. The Zap bridge is a separate
+module, so only services that use it pull in Zap:
 
 ```bash
-go get go.uber.org/zap
+go get github.com/adnvilla/logger-go/zap
 ```
+
+Both modules are released together with the same version (tags `vX.Y.Z` and
+`zap/vX.Y.Z`).
+
+Upgrading from `v1.0.x`? Read the [Phase 2 migration notes](docs/migration/phase-2-handler-contract.md).
 
 ## Quick start
 
@@ -74,7 +80,7 @@ request context.
 
 ### Using the Zap handler
 
-The `zap` subpackage implements `slog.Handler`, which allows slog to write to Zap. This means you can continue using the familiar `zap.Logger` ecosystem while adopting `log/slog`.
+The `zap` module (`github.com/adnvilla/logger-go/zap`) implements `slog.Handler`, which allows slog to write to Zap. This means you can continue using the familiar `zap.Logger` ecosystem while adopting `log/slog`.
 
 ```go
 import (
@@ -97,14 +103,58 @@ func main() {
 }
 ```
 
-Refer to [`examples/zap`](examples/zap/main.go) for a runnable program that mirrors the snippet above.
+See [`ExampleNewHandler`](zap/example_test.go) for a runnable example.
+
+The bridge delegates to [`zapslog`](https://pkg.go.dev/go.uber.org/zap/exp/zapslog)
+and follows the full `slog.Handler` contract
+(see [ADR 0001](docs/adr/0001-zap-backend-and-library-direction.md)):
+
+- `WithGroup` and `slog.Group` nest attributes; they never change the Zap logger name.
+- Empty attributes and empty groups are dropped, and empty-key groups are inlined.
+- `slog.LogValuer` values are resolved, so types can redact themselves.
+- The record time and the caller from `slog.Record` are preserved.
+
+```go
+type password string
+
+func (password) LogValue() slog.Value { return slog.StringValue("[REDACTED]") }
+
+log := slog.New(zap.NewHandler(zapLogger))
+log.WithGroup("request").Info("login", "user", "u1", "password", password("hunter2"))
+```
+
+```json
+{"level":"info","ts":"2026-09-29T00:00:00Z","caller":"app/main.go:42","msg":"login","request":{"user":"u1","password":"[REDACTED]"}}
+```
+
+Levels map by range, the same way for filtering and for emission:
+
+| slog level | Zap level |
+|---|---|
+| below `Info` | `Debug` |
+| `Info` up to below `Warn` | `Info` |
+| `Warn` up to below `Error` | `Warn` |
+| `Error` and above | `Error` |
+
+`NewHandler` writes through the logger's core, so the level, encoder, outputs,
+hooks, logger name and fields added with `zapLogger.With` still apply. Caller and
+stack-trace settings of the `zap.Logger` itself are not visible to the bridge.
+Configure them with options instead:
+
+```go
+zap.NewHandler(zapLogger,
+    zap.WithCaller(true),                  // default: true (printed when the encoder has a CallerKey)
+    zap.WithStacktraceAt(slog.LevelError), // default: Error; zap.WithoutStacktrace() disables it
+)
+```
 
 ## Testing
 
 Run the tests with:
 
 ```bash
-go test -race -cover ./...
+go test -race -cover ./...                # core module
+(cd zap && go test -race -cover ./...)    # Zap bridge module
 ```
 
 The integration suite verifies that production JSON remains newline-delimited and

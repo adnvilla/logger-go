@@ -56,6 +56,26 @@ produces a patch release without a phase name. Use this only for hotfixes.
 
 ## Nested modules
 
-Once the Zap adapter becomes its own module (#21), its tags are prefixed
-(`zap/vX.Y.Z`). The details of how those tags are produced live with that
-change.
+The Zap bridge is its own module, `github.com/adnvilla/logger-go/zap` (`zap/go.mod`).
+Both modules are released in lockstep with the same version:
+
+- `.releaserc.json` runs `@semantic-release/exec` in the prepare step to pin
+  `zap/go.mod` to the root version being released. The release commit
+  includes that edit.
+- In the publish step, it also tags `zap/vX.Y.Z` on the release commit.
+- The Zap module requires the root version that no longer contains the `zap`
+  package. Upgrading the bridge therefore always upgrades the root module, and
+  consumers never hit an "ambiguous import" error.
+- `zap/go.mod` has `replace github.com/adnvilla/logger-go => ../` for local
+  development. Consumers ignore `replace` directives.
+
+CI tests the Zap module in its own job and fails if `go mod tidy` would change
+`zap/go.mod` or `zap/go.sum`.
+
+## Major versions
+
+Do not mark commits as breaking (`feat!:` or a `BREAKING CHANGE:` footer)
+unless a v2 is intended. semantic-release would publish `v2.0.0`, and a Go
+module at v2 must change its module path to `github.com/adnvilla/logger-go/v2`
+(and `.../zap/v2`). Without that change, `go get` rejects the version.
+Deprecate instead, and plan a v2 as its own phase (see #30).
