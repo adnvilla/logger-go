@@ -5,9 +5,12 @@ It keeps a logger inside a `context.Context`, exposes convenience helpers for th
 
 ## Features
 
-- **Context aware logging** – store an entire `*slog.Logger` on the request/operation context and retrieve it from anywhere in your call stack.
-- **Simple level helpers** – `logger.Info`, `logger.Warn`, `logger.Error`, and `logger.Debug` forward to the logger associated with the context.
-- **Zap bridge** – use the provided `zap.NewHandler` to emit structured logs through [`go.uber.org/zap`](https://pkg.go.dev/go.uber.org/zap).
+- **Production schema** – `logger.NewProduction` emits newline-delimited JSON with OpenTelemetry key names ([schema](docs/schema.md)), redaction of sensitive keys and consistent error fields.
+- **Context attributes** – `logger.WithAttrs` carries request data such as request IDs in the context. `NewContextHandler` adds it to every record at the top level.
+- **Trace correlation** – the `otel` module adds `trace_id`/`span_id`/`trace_flags` from the active OpenTelemetry span. See [logs vs traces vs metrics](docs/observability.md) for what this library does and does not do.
+- **Context aware logging** – store a `*slog.Logger` on the request/operation context and retrieve it from anywhere in your call stack.
+- **Simple level helpers** – `logger.Info`, `logger.Warn`, `logger.Error`, and `logger.Debug` forward to the logger associated with the context and report the caller's line.
+- **Zap bridge** – the `zap` module's `NewHandler` emits structured logs through [`go.uber.org/zap`](https://pkg.go.dev/go.uber.org/zap), useful during migrations.
 
 ## Installation
 
