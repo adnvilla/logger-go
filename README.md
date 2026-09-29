@@ -5,9 +5,12 @@ It keeps a logger inside a `context.Context`, exposes convenience helpers for th
 
 ## Features
 
-- **Context aware logging** – store an entire `*slog.Logger` on the request/operation context and retrieve it from anywhere in your call stack.
-- **Simple level helpers** – `logger.Info`, `logger.Warn`, `logger.Error`, and `logger.Debug` forward to the logger associated with the context.
-- **Zap bridge** – use the provided `zap.NewHandler` to emit structured logs through [`go.uber.org/zap`](https://pkg.go.dev/go.uber.org/zap).
+- **Production schema** – `logger.NewProduction` emits newline-delimited JSON with OpenTelemetry key names ([schema](docs/schema.md)), redaction of sensitive keys and consistent error fields.
+- **Context attributes** – `logger.WithAttrs` carries request data such as request IDs in the context. `NewContextHandler` adds it to every record at the top level.
+- **Trace correlation** – the `otel` module adds `trace_id`/`span_id`/`trace_flags` from the active OpenTelemetry span. See [logs vs traces vs metrics](docs/observability.md) for what this library does and does not do.
+- **Context aware logging** – store a `*slog.Logger` on the request/operation context and retrieve it from anywhere in your call stack.
+- **Simple level helpers** – `logger.Info`, `logger.Warn`, `logger.Error`, and `logger.Debug` forward to the logger associated with the context and report the caller's line.
+- **Zap bridge** – the `zap` module's `NewHandler` emits structured logs through [`go.uber.org/zap`](https://pkg.go.dev/go.uber.org/zap), useful during migrations.
 
 ## Installation
 
@@ -56,6 +59,62 @@ treated as `context.Background()`, as in `log/slog`.
 `logger.SetLogger(ctx, handler)` still works but is deprecated: it mixes the
 process-wide default with context storage. See
 [ADR 0002](docs/adr/0002-context-and-default-logger.md).
+
+### Production logger (recommended)
+
+`logger.NewProduction` emits the shared production schema
+([docs/schema.md](docs/schema.md)). It writes JSON to stdout with OpenTelemetry
+key names, puts context attributes and trace IDs at the top level, redacts
+sensitive keys and serializes errors:
+
+```go
+import (
+    logger "github.com/adnvilla/logger-go"
+    loggerotel "github.com/adnvilla/logger-go/otel"
+)
+
+l := logger.NewProduction(logger.Config{
+    ServiceName:    "navi-api",
+    ServiceVersion: version,
+    Environment:    "production",
+    Extractors:     []logger.ContextExtractor{loggerotel.SpanContext}, // optional
+})
+slog.SetDefault(l)
+
+ctx := logger.WithAttrs(r.Context(), slog.String(logger.KeyRequestID, reqID))
+slog.InfoContext(ctx, "http request completed",
+    slog.String(logger.KeyHTTPRoute, route),
+    slog.Int(logger.KeyHTTPResponseStatusCode, status))
+```
+
+```json
+{"time":"…","level":"INFO","msg":"http request completed","service.name":"navi-api","service.version":"1.4.0","deployment.environment.name":"production","trace_id":"4bf9…","span_id":"00f0…","trace_flags":"01","request_id":"…","http.route":"/items/:id","http.response.status_code":200}
+```
+
+Services that still use Zap can keep it as the encoder with
+`Config{Handler: zap.NewHandler(zapLogger)}`.
+
+### Trace correlation (OpenTelemetry)
+
+The `otel` module adds the active span's `trace_id`, `span_id` and `trace_flags`
+to every record, so logs can be joined with traces. It is a separate module, so
+services without OpenTelemetry do not depend on it:
+
+```bash
+go get github.com/adnvilla/logger-go/otel
+```
+
+```go
+import loggerotel "github.com/adnvilla/logger-go/otel"
+
+l := slog.New(loggerotel.NewHandler(slog.NewJSONHandler(os.Stdout, nil)))
+// With the otelhttp or otelgin middleware in place:
+slog.InfoContext(r.Context(), "handling request")
+// {"msg":"handling request","trace_id":"4bf9…","span_id":"00f0…","trace_flags":"01"}
+```
+
+`loggerotel.SpanContext` is a `logger.ContextExtractor`. You can also pass it to
+`logger.NewContextHandler` together with your own extractors.
 
 ### Request-scoped attributes in the context (recommended)
 
@@ -187,6 +246,7 @@ Run the tests with:
 ```bash
 go test -race -cover ./...                # core module
 (cd zap && go test -race -cover ./...)    # Zap bridge module
+(cd otel && go test -race -cover ./...)   # OpenTelemetry correlation module
 ```
 
 The integration suite verifies that production JSON remains newline-delimited and

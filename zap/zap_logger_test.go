@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"runtime"
@@ -389,4 +391,39 @@ func TestContextAttributesThroughTheBridge(t *testing.T) {
 
 	r := onlyRecord(t, records())
 	assertJSON(t, []any{r["request_id"], r["db"]}, `["r1", {"rows": 3}]`)
+}
+
+func TestErrorSerializationThroughTheBridge(t *testing.T) {
+	zapLogger, records := jsonLogger(t, zapcore.DebugLevel)
+	l := slog.New(logger.NewErrorHandler(NewHandler(zapLogger, WithCaller(false), WithoutStacktrace())))
+
+	l.Error("failed", "error", fmt.Errorf("dial: %w", errors.New("refused")))
+
+	r := onlyRecord(t, records())
+	assertJSON(t, []any{r["error.type"], r["error.message"]}, `["*fmt.wrapError", "dial: refused"]`)
+}
+
+func TestRedactionThroughTheBridge(t *testing.T) {
+	zapLogger, records := jsonLogger(t, zapcore.DebugLevel)
+	l := slog.New(logger.NewRedactHandler(NewHandler(zapLogger, WithCaller(false))))
+
+	l.With("token", "t0k3n").Info("login", slog.Group("req", "authorization", "Bearer x", "path", "/login"))
+
+	r := onlyRecord(t, records())
+	assertJSON(t, []any{r["token"], r["req"]}, `["[REDACTED]", {"authorization": "[REDACTED]", "path": "/login"}]`)
+}
+
+func TestProductionWithTheBridge(t *testing.T) {
+	zapLogger, records := jsonLogger(t, zapcore.DebugLevel)
+	l := logger.NewProduction(logger.Config{
+		ServiceName: "navi-api",
+		Handler:     NewHandler(zapLogger, WithCaller(false), WithoutStacktrace()),
+	})
+	ctx := logger.WithAttrs(context.Background(), slog.String(logger.KeyRequestID, "r1"))
+
+	l.WithGroup("db").ErrorContext(ctx, "failed", "error", errors.New("boom"), "password", "p")
+
+	r := onlyRecord(t, records())
+	assertJSON(t, []any{r["service.name"], r["request_id"], r["db"]},
+		`["navi-api", "r1", {"error.type": "*errors.errorString", "error.message": "boom", "password": "[REDACTED]"}]`)
 }
