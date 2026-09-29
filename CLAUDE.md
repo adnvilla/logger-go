@@ -16,8 +16,8 @@ This is a Go library (`github.com/adnvilla/logger-go`) that wraps `log/slog` wit
 
 ### Root package (`logger`)
 
-- **`context.go`** — Stores/retrieves `*slog.Logger` in `context.Context` using a private key. `FromContext` falls back to `slog.Default()`. `With` creates a child logger with extra attributes.
-- **`logger.go`** — `SetLogger` initializes both the context logger and `slog.Default()`. Level helpers (`Info`, `Warn`, `Error`, `Debug`) extract the logger from context and delegate to it.
+- **`context.go`** — Stores/retrieves `*slog.Logger` in `context.Context` using a private key. `FromContext` never returns nil (falls back to `slog.Default()`); nil contexts are treated as `context.Background()`; `WithContext(ctx, nil)` is a no-op. `With` creates a child logger with extra attributes.
+- **`logger.go`** — Level helpers (`Info`, `Warn`, `Error`, `Debug`) extract the logger from context and delegate to it. `SetLogger` is deprecated (ADR 0002): use `slog.SetDefault` + `WithContext`.
 
 ### `zap/` module (`github.com/adnvilla/logger-go/zap`)
 
@@ -27,7 +27,7 @@ This is a Go library (`github.com/adnvilla/logger-go`) that wraps `log/slog` wit
 ### Key design points
 
 - All logging functions take `context.Context` as the first argument — the logger travels through the call stack via context, not globals.
-- `SetLogger` both sets the context logger and `slog.SetDefault`, so code using either path gets the configured handler.
+- Process configuration (`slog.SetDefault`) is kept separate from context storage; request-scoped data should travel as context attributes (ADR 0002).
 - Level helpers build the `slog.Record` themselves (`runtime.Callers`) so the reported caller is the application line.
 - Tests use a `mockHandler` (in `logger_test.go`) that captures `slog.Record` entries; zap tests assert emitted JSON.
 

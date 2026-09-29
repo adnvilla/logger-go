@@ -7,3 +7,4 @@ decision. Supersede it with a new ADR instead.
 | ADR | Title | Status |
 |---|---|---|
 | [0001](0001-zap-backend-and-library-direction.md) | Zap backend and library direction | Accepted |
+| [0002](0002-context-and-default-logger.md) | Context storage and the default logger | Accepted |
