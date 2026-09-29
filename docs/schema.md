@@ -104,10 +104,14 @@ An attribute named `error` or `err` whose value is an `error` is replaced by
   - Everything else belongs to the call site.
 
 ### Grouping
-- **Canonical keys are always top-level.** Context attributes (request and trace
-  IDs) stay top-level even inside `logger.WithGroup` (see ADR 0002).
+- **Keys set by the library are always top-level.** This covers resource keys
+  and context attributes such as request and trace IDs, even inside
+  `logger.WithGroup` (see ADR 0002).
+- Call-site keys, including the `error.*` fields, follow open groups like any
+  record attribute. Log canonical call-site keys (HTTP, RPC, errors) from
+  loggers without open groups.
 - Application-specific data may use groups, for example
-  `{"db":{"rows":3}}`. Groups must never contain canonical keys.
+  `{"db":{"rows":3}}`.
 
 ### Cardinality
 - Logs may carry high-cardinality values (IDs, paths). Those values must

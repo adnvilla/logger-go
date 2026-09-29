@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"runtime"
@@ -389,4 +391,14 @@ func TestContextAttributesThroughTheBridge(t *testing.T) {
 
 	r := onlyRecord(t, records())
 	assertJSON(t, []any{r["request_id"], r["db"]}, `["r1", {"rows": 3}]`)
+}
+
+func TestErrorSerializationThroughTheBridge(t *testing.T) {
+	zapLogger, records := jsonLogger(t, zapcore.DebugLevel)
+	l := slog.New(logger.NewErrorHandler(NewHandler(zapLogger, WithCaller(false), WithoutStacktrace())))
+
+	l.Error("failed", "error", fmt.Errorf("dial: %w", errors.New("refused")))
+
+	r := onlyRecord(t, records())
+	assertJSON(t, []any{r["error.type"], r["error.message"]}, `["*fmt.wrapError", "dial: refused"]`)
 }
