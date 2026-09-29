@@ -33,14 +33,14 @@
     [
       "@semantic-release/exec",
       {
-        "prepareCmd": "sed -i -E 's#^(\\s*github\\.com/adnvilla/logger-go) v[^ ]+#\\1 v${nextRelease.version}#' zap/go.mod",
-        "publishCmd": "git tag zap/v${nextRelease.version} && git push origin zap/v${nextRelease.version}"
+        "prepareCmd": "sed -i -E 's#^(\\s*github\\.com/adnvilla/logger-go) v[^ ]+#\\1 v${nextRelease.version}#' zap/go.mod otel/go.mod",
+        "publishCmd": "for m in zap otel; do git tag $m/v${nextRelease.version}; done && git push origin zap/v${nextRelease.version} otel/v${nextRelease.version}"
       }
     ],
     [
       "@semantic-release/git",
       {
-        "assets": ["CHANGELOG.md", "zap/go.mod"],
+        "assets": ["CHANGELOG.md", "zap/go.mod", "otel/go.mod"],
         "message": "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}"
       }
     ],

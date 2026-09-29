@@ -57,6 +57,28 @@ treated as `context.Background()`, as in `log/slog`.
 process-wide default with context storage. See
 [ADR 0002](docs/adr/0002-context-and-default-logger.md).
 
+### Trace correlation (OpenTelemetry)
+
+The `otel` module adds the active span's `trace_id`, `span_id` and `trace_flags`
+to every record, so logs can be joined with traces. It is a separate module, so
+services without OpenTelemetry do not depend on it:
+
+```bash
+go get github.com/adnvilla/logger-go/otel
+```
+
+```go
+import loggerotel "github.com/adnvilla/logger-go/otel"
+
+l := slog.New(loggerotel.NewHandler(slog.NewJSONHandler(os.Stdout, nil)))
+// With the otelhttp or otelgin middleware in place:
+slog.InfoContext(r.Context(), "handling request")
+// {"msg":"handling request","trace_id":"4bf9…","span_id":"00f0…","trace_flags":"01"}
+```
+
+`loggerotel.SpanContext` is a `logger.ContextExtractor`. You can also pass it to
+`logger.NewContextHandler` together with your own extractors.
+
 ### Request-scoped attributes in the context (recommended)
 
 Put request data in the context as attributes, and wrap your handler once with
@@ -187,6 +209,7 @@ Run the tests with:
 ```bash
 go test -race -cover ./...                # core module
 (cd zap && go test -race -cover ./...)    # Zap bridge module
+(cd otel && go test -race -cover ./...)   # OpenTelemetry correlation module
 ```
 
 The integration suite verifies that production JSON remains newline-delimited and

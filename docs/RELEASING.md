@@ -56,21 +56,31 @@ produces a patch release without a phase name. Use this only for hotfixes.
 
 ## Nested modules
 
-The Zap bridge is its own module, `github.com/adnvilla/logger-go/zap` (`zap/go.mod`).
-Both modules are released in lockstep with the same version:
+Two nested modules live in this repository:
+
+- the Zap bridge, `github.com/adnvilla/logger-go/zap` (`zap/go.mod`);
+- the OpenTelemetry correlation, `github.com/adnvilla/logger-go/otel` (`otel/go.mod`).
+
+All modules are released in lockstep with the same version:
 
 - `.releaserc.json` runs `@semantic-release/exec` in the prepare step to pin
-  `zap/go.mod` to the root version being released. The release commit
-  includes that edit.
-- In the publish step, it also tags `zap/vX.Y.Z` on the release commit.
-- The Zap module requires the root version that no longer contains the `zap`
-  package. Upgrading the bridge therefore always upgrades the root module, and
-  consumers never hit an "ambiguous import" error.
-- `zap/go.mod` has `replace github.com/adnvilla/logger-go => ../` for local
-  development. Consumers ignore `replace` directives.
+  each nested `go.mod` to the root version being released. The release commit
+  includes those edits.
+- In the publish step, it also tags `zap/vX.Y.Z` and `otel/vX.Y.Z` on the
+  release commit.
+- Each nested module requires the root version it was released with. For the
+  Zap module, that version no longer contains the `zap` package, so upgrading
+  the bridge always upgrades the root module and consumers never hit an
+  "ambiguous import" error.
+- Nested `go.mod` files have `replace github.com/adnvilla/logger-go => ../` for
+  local development. Consumers ignore `replace` directives.
 
-CI tests the Zap module in its own job and fails if `go mod tidy` would change
-`zap/go.mod` or `zap/go.sum`.
+CI tests each nested module in its own job (`module (zap)`, `module (otel)`) and
+fails if `go mod tidy` would change its `go.mod` or `go.sum`.
+
+To add another nested module, add its directory to the `prepareCmd` and
+`publishCmd` in `.releaserc.json`, to the `@semantic-release/git` assets, and to
+the CI matrix.
 
 ## Major versions
 

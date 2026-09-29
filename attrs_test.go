@@ -223,3 +223,36 @@ func BenchmarkContextHandlerWithAttrsAndGroup(b *testing.B) {
 func BenchmarkJSONHandlerBaseline(b *testing.B) {
 	benchmarkContextHandler(b, slog.New(slog.NewJSONHandler(io.Discard, nil)), context.Background())
 }
+
+func TestContextExtractors(t *testing.T) {
+	var buf bytes.Buffer
+	base := slog.NewJSONHandler(&buf, &slog.HandlerOptions{ReplaceAttr: removeVolatileSlogAttrs})
+	type key struct{}
+	fromKey := func(ctx context.Context) []slog.Attr {
+		if v, ok := ctx.Value(key{}).(string); ok {
+			return []slog.Attr{slog.String("trace_id", v)}
+		}
+		return nil
+	}
+	static := func(context.Context) []slog.Attr { return []slog.Attr{slog.String("zone", "z1")} }
+
+	h := logger.NewContextHandler(logger.NewContextHandler(base, fromKey), static) // extractors accumulate
+	l := slog.New(h)
+	ctx := logger.WithAttrs(context.WithValue(context.Background(), key{}, "t1"), slog.String("request_id", "r1"))
+
+	l.WithGroup("db").InfoContext(ctx, "q", "rows", 1)
+	l.InfoContext(context.Background(), "no trace", "k", 1)
+
+	var got []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+		var r map[string]any
+		if err := json.Unmarshal([]byte(line), &r); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, r)
+	}
+	mustJSON(t, got, `[
+		{"level":"INFO","msg":"q","trace_id":"t1","zone":"z1","request_id":"r1","db":{"rows":1}},
+		{"level":"INFO","msg":"no trace","zone":"z1","k":1}
+	]`)
+}
