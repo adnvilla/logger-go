@@ -1,14 +1,18 @@
 # This workflow will build a golang project
 # Uses the reusable workflow from adnvilla/gha-toolkit
 # For more information see: https://github.com/adnvilla/gha-toolkit
+#
+# Phase work lands on phase integration branches (phase-N/main) through
+# stacked PRs (phase-N/<issue>-<slug>), so CI runs for PRs into any of them.
+# See docs/RELEASING.md.
 
 name: Go
 
 on:
   push:
-    branches: [ "master" ]
+    branches: [ "master", "phase-*/main" ]
   pull_request:
-    branches: [ "master" ]
+    branches: [ "master", "phase-*/**" ]
 
 jobs:
   build-and-test:
