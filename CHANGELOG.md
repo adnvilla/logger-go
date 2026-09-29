@@ -1,3 +1,10 @@
+## [1.2.0](https://github.com/adnvilla/logger-go/compare/v1.1.0...v1.2.0) (2026-09-29)
+
+### Features
+
+* carry request attributes in context through a handler middleware ([#41](https://github.com/adnvilla/logger-go/issues/41)) ([adb4d5e](https://github.com/adnvilla/logger-go/commit/adb4d5e8a4d273c390d4d780142b74d65567b1a2)), closes [#23](https://github.com/adnvilla/logger-go/issues/23)
+* separate default-logger configuration from context storage ([#40](https://github.com/adnvilla/logger-go/issues/40)) ([1eed80c](https://github.com/adnvilla/logger-go/commit/1eed80cdc05a04b687036d69f6fba1a9a340348e)), closes [#10](https://github.com/adnvilla/logger-go/issues/10)
+
 ## [1.1.0](https://github.com/adnvilla/logger-go/compare/v1.0.1...v1.1.0) (2026-09-29)
 
 ### Features
