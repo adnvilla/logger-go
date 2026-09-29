@@ -5,10 +5,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build & Test Commands
 
 - **Build:** `make` or `go build ./...`
-- **Test all:** `go test ./...`
-- **Test single package:** `go test ./zap/`
-- **Test single test:** `go test -run TestZapHandler_Handle ./zap/`
-- **Tidy deps:** `go mod tidy`
+- **Test core module:** `go test ./...`
+- **Test Zap module:** `cd zap && go test ./...` (separate module, `zap/go.mod`)
+- **Test single test:** `cd zap && go test -run TestGroupsAndAttributes ./...`
+- **Tidy deps:** `go mod tidy && (cd zap && go mod tidy)`
 
 ## Architecture
 
@@ -19,15 +19,17 @@ This is a Go library (`github.com/adnvilla/logger-go`) that wraps `log/slog` wit
 - **`context.go`** — Stores/retrieves `*slog.Logger` in `context.Context` using a private key. `FromContext` falls back to `slog.Default()`. `With` creates a child logger with extra attributes.
 - **`logger.go`** — `SetLogger` initializes both the context logger and `slog.Default()`. Level helpers (`Info`, `Warn`, `Error`, `Debug`) extract the logger from context and delegate to it.
 
-### `zap/` subpackage
+### `zap/` module (`github.com/adnvilla/logger-go/zap`)
 
-- **`zap_logger.go`** — `ZapHandler` implements `slog.Handler`, bridging slog calls to a `zap.Logger`. `NewHandler` adds `CallerSkip(4)` to align caller frames. Level mapping via `convertSlogLevel`.
+- Separate Go module so core users do not inherit Zap; released in lockstep with the root (`zap/vX.Y.Z`).
+- **`zap_logger.go`** — `NewHandler(*zap.Logger, ...Option)` delegates to `go.uber.org/zap/exp/zapslog` (ADR 0001). Options: `WithCaller`, `WithStacktraceAt`, `WithoutStacktrace`. Levels map by range for both `Enabled` and `Handle`.
 
 ### Key design points
 
 - All logging functions take `context.Context` as the first argument — the logger travels through the call stack via context, not globals.
 - `SetLogger` both sets the context logger and `slog.SetDefault`, so code using either path gets the configured handler.
-- Tests use a `mockHandler` (in `logger_test.go`) that captures `slog.Record` entries for assertions; zap tests use `zaptest/observer`.
+- Level helpers build the `slog.Record` themselves (`runtime.Callers`) so the reported caller is the application line.
+- Tests use a `mockHandler` (in `logger_test.go`) that captures `slog.Record` entries; zap tests assert emitted JSON.
 
 ## Branching & releases
 
