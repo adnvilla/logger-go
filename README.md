@@ -25,6 +25,8 @@ go get github.com/adnvilla/logger-go/zap
 Both modules are released together with the same version (tags `vX.Y.Z` and
 `zap/vX.Y.Z`).
 
+Upgrading from `v1.0.x`? Read the [Phase 2 migration notes](docs/migration/phase-2-handler-contract.md).
+
 ## Quick start
 
 ```go
