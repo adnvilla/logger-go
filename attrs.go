@@ -36,24 +36,37 @@ func AttrsFromContext(ctx context.Context) []slog.Attr {
 	return attrs
 }
 
-// NewContextHandler returns a handler that adds the attributes carried by the
-// logging context (see WithAttrs) to every record, then delegates to next.
+// ContextExtractor derives attributes from a logging context, for example
+// trace and span IDs from the active span (see the logger-go/otel module).
+// It must be safe for concurrent use and should return nil when it has nothing
+// to add.
+type ContextExtractor func(ctx context.Context) []slog.Attr
+
+// NewContextHandler returns a handler that adds attributes derived from the
+// logging context to every record, then delegates to next: first those
+// returned by each extractor, in order, then those carried with WithAttrs.
 //
 // Context attributes are always emitted at the top level, before the record's
 // own attributes, even when groups are open (logger.WithGroup), so correlation
 // fields such as request or trace IDs keep a stable path. They are not
 // de-duplicated against attributes with the same key.
 //
-// Wrapping a handler that is already a context handler returns it unchanged.
-// NewContextHandler panics if next is nil.
-func NewContextHandler(next slog.Handler) slog.Handler {
+// Wrapping a context handler again adds the new extractors to it instead of
+// nesting (without extractors, it is returned unchanged). NewContextHandler
+// panics if next is nil.
+func NewContextHandler(next slog.Handler, extractors ...ContextExtractor) slog.Handler {
 	if next == nil {
 		panic("logger: NewContextHandler called with a nil handler")
 	}
 	if h, ok := next.(*contextHandler); ok {
-		return h
+		if len(extractors) == 0 {
+			return h
+		}
+		c := *h
+		c.extractors = append(append([]ContextExtractor(nil), h.extractors...), extractors...)
+		return &c
 	}
-	return &contextHandler{next: next, root: next}
+	return &contextHandler{next: next, root: next, extractors: append([]ContextExtractor(nil), extractors...)}
 }
 
 // contextHandler keeps two views of the wrapped handler: next has every
@@ -61,9 +74,10 @@ func NewContextHandler(next slog.Handler) slog.Handler {
 // WithGroup. ops records the calls made since that first group so they can be
 // replayed on top of root after adding context attributes at the top level.
 type contextHandler struct {
-	next slog.Handler
-	root slog.Handler
-	ops  []handlerOp
+	next       slog.Handler
+	root       slog.Handler
+	ops        []handlerOp
+	extractors []ContextExtractor
 }
 
 type handlerOp struct {
@@ -76,7 +90,7 @@ func (h *contextHandler) Enabled(ctx context.Context, level slog.Level) bool {
 }
 
 func (h *contextHandler) Handle(ctx context.Context, r slog.Record) error {
-	attrs := AttrsFromContext(ctx)
+	attrs := h.contextAttrs(ctx)
 	if len(attrs) == 0 {
 		return h.next.Handle(ctx, r)
 	}
@@ -104,22 +118,38 @@ func (h *contextHandler) Handle(ctx context.Context, r slog.Record) error {
 	return next.Handle(ctx, r)
 }
 
+// contextAttrs returns the extractor attributes followed by WithAttrs ones.
+func (h *contextHandler) contextAttrs(ctx context.Context) []slog.Attr {
+	carried := AttrsFromContext(ctx)
+	if len(h.extractors) == 0 {
+		return carried
+	}
+	var attrs []slog.Attr
+	for _, extract := range h.extractors {
+		attrs = append(attrs, extract(ctx)...)
+	}
+	if len(attrs) == 0 {
+		return carried
+	}
+	return append(attrs, carried...)
+}
+
 func (h *contextHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	if len(attrs) == 0 {
 		return h
 	}
 	next := h.next.WithAttrs(attrs)
 	if len(h.ops) == 0 {
-		return &contextHandler{next: next, root: next}
+		return &contextHandler{next: next, root: next, extractors: h.extractors}
 	}
-	return &contextHandler{next: next, root: h.root, ops: h.withOp(handlerOp{attrs: attrs})}
+	return &contextHandler{next: next, root: h.root, ops: h.withOp(handlerOp{attrs: attrs}), extractors: h.extractors}
 }
 
 func (h *contextHandler) WithGroup(name string) slog.Handler {
 	if name == "" {
 		return h
 	}
-	return &contextHandler{next: h.next.WithGroup(name), root: h.root, ops: h.withOp(handlerOp{group: name})}
+	return &contextHandler{next: h.next.WithGroup(name), root: h.root, ops: h.withOp(handlerOp{group: name}), extractors: h.extractors}
 }
 
 // withOp returns a new slice so handlers derived from the same parent never

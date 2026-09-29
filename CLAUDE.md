@@ -7,8 +7,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Build:** `make` or `go build ./...`
 - **Test core module:** `go test ./...`
 - **Test Zap module:** `cd zap && go test ./...` (separate module, `zap/go.mod`)
+- **Test OTel module:** `cd otel && go test ./...` (separate module, `otel/go.mod`)
 - **Test single test:** `cd zap && go test -run TestGroupsAndAttributes ./...`
-- **Tidy deps:** `go mod tidy && (cd zap && go mod tidy)`
+- **Tidy deps:** `go mod tidy && (cd zap && go mod tidy) && (cd otel && go mod tidy)`
 
 ## Architecture
 
@@ -24,6 +25,11 @@ This is a Go library (`github.com/adnvilla/logger-go`) that wraps `log/slog` wit
 
 - Separate Go module so core users do not inherit Zap; released in lockstep with the root (`zap/vX.Y.Z`).
 - **`zap_logger.go`** — `NewHandler(*zap.Logger, ...Option)` delegates to `go.uber.org/zap/exp/zapslog` (ADR 0001). Options: `WithCaller`, `WithStacktraceAt`, `WithoutStacktrace`. Levels map by range for both `Enabled` and `Handle`.
+
+### `otel/` module (`github.com/adnvilla/logger-go/otel`)
+
+- Separate Go module (OpenTelemetry dependency stays out of the core); released in lockstep (`otel/vX.Y.Z`).
+- `SpanContext` is a `logger.ContextExtractor` emitting `trace_id`/`span_id`/`trace_flags`; `NewHandler(next)` = `logger.NewContextHandler(next, SpanContext)`.
 
 ### Key design points
 
