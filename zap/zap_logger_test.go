@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	logger "github.com/adnvilla/logger-go"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -364,4 +365,17 @@ func BenchmarkHandlerWithAttrs(b *testing.B) {
 	l := slog.New(NewHandler(discardLogger(zapcore.DebugLevel), WithCaller(false))).
 		With("svc", "api", "env", "prod", "ver", "1.2.3", "region", "us")
 	benchmarkHandler(b, l, slog.LevelInfo)
+}
+
+func TestCallerThroughLoggerHelpers(t *testing.T) {
+	zapLogger, records := jsonLogger(t, zapcore.DebugLevel)
+	ctx := logger.WithContext(context.Background(), slog.New(NewHandler(zapLogger)))
+
+	_, file, line, _ := runtime.Caller(0)
+	logger.Info(ctx, "helper") // must be reported as this line
+
+	want := file + ":" + strconv.Itoa(line+1)
+	if got := onlyRecord(t, records())["caller"]; got != want {
+		t.Errorf("caller = %v, want %v", got, want)
+	}
 }
