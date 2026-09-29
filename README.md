@@ -57,6 +57,40 @@ treated as `context.Background()`, as in `log/slog`.
 process-wide default with context storage. See
 [ADR 0002](docs/adr/0002-context-and-default-logger.md).
 
+### Production logger (recommended)
+
+`logger.NewProduction` emits the shared production schema
+([docs/schema.md](docs/schema.md)). It writes JSON to stdout with OpenTelemetry
+key names, puts context attributes and trace IDs at the top level, redacts
+sensitive keys and serializes errors:
+
+```go
+import (
+    logger "github.com/adnvilla/logger-go"
+    loggerotel "github.com/adnvilla/logger-go/otel"
+)
+
+l := logger.NewProduction(logger.Config{
+    ServiceName:    "navi-api",
+    ServiceVersion: version,
+    Environment:    "production",
+    Extractors:     []logger.ContextExtractor{loggerotel.SpanContext}, // optional
+})
+slog.SetDefault(l)
+
+ctx := logger.WithAttrs(r.Context(), slog.String(logger.KeyRequestID, reqID))
+slog.InfoContext(ctx, "http request completed",
+    slog.String(logger.KeyHTTPRoute, route),
+    slog.Int(logger.KeyHTTPResponseStatusCode, status))
+```
+
+```json
+{"time":"…","level":"INFO","msg":"http request completed","service.name":"navi-api","service.version":"1.4.0","deployment.environment.name":"production","trace_id":"4bf9…","span_id":"00f0…","trace_flags":"01","request_id":"…","http.route":"/items/:id","http.response.status_code":200}
+```
+
+Services that still use Zap can keep it as the encoder with
+`Config{Handler: zap.NewHandler(zapLogger)}`.
+
 ### Trace correlation (OpenTelemetry)
 
 The `otel` module adds the active span's `trace_id`, `span_id` and `trace_flags`

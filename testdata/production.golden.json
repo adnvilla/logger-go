@@ -1,0 +1,68 @@
+[
+  {
+    "client.address": "203.0.113.7",
+    "deployment.environment.name": "production",
+    "duration_ms": 12,
+    "http.request.method": "GET",
+    "http.response.body.size": 512,
+    "http.response.status_code": 200,
+    "http.route": "/items/:id",
+    "level": "INFO",
+    "msg": "http request completed",
+    "request_id": "req-123",
+    "service.name": "navi-api",
+    "service.version": "1.4.0",
+    "url.path": "/items/42"
+  },
+  {
+    "client.address": "203.0.113.7",
+    "deployment.environment.name": "production",
+    "duration_ms": 3,
+    "http.request.method": "GET",
+    "http.response.status_code": 404,
+    "http.route": "/items/:id",
+    "level": "WARN",
+    "msg": "http request completed",
+    "request_id": "req-123",
+    "service.name": "navi-api",
+    "service.version": "1.4.0",
+    "url.path": "/items/42"
+  },
+  {
+    "deployment.environment.name": "production",
+    "enduser.id": "u-1",
+    "error.message": "query items: connection refused",
+    "error.type": "*fmt.wrapError",
+    "level": "ERROR",
+    "msg": "item lookup failed",
+    "request_id": "req-123",
+    "service.name": "navi-api",
+    "service.version": "1.4.0"
+  },
+  {
+    "deployment.environment.name": "production",
+    "headers": {
+      "Authorization": "[REDACTED]",
+      "accept": "json"
+    },
+    "level": "INFO",
+    "msg": "login",
+    "password": "[REDACTED]",
+    "request_id": "req-123",
+    "service.name": "navi-api",
+    "service.version": "1.4.0",
+    "user": "u-1"
+  },
+  {
+    "db": {
+      "rows": 3,
+      "table": "items"
+    },
+    "deployment.environment.name": "production",
+    "level": "INFO",
+    "msg": "query",
+    "request_id": "req-123",
+    "service.name": "navi-api",
+    "service.version": "1.4.0"
+  }
+]
