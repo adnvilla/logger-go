@@ -25,7 +25,8 @@ func ExampleNewHandler() {
 	})
 	zapLogger := zap.New(zapcore.NewCore(encoder, zapcore.AddSync(os.Stdout), zapcore.DebugLevel))
 
-	ctx := logger.SetLogger(context.Background(), loggerzap.NewHandler(zapLogger))
+	l := slog.New(loggerzap.NewHandler(zapLogger))
+	ctx := logger.WithContext(context.Background(), l)
 	ctx = logger.With(ctx, "service", "checkout")
 
 	logger.Info(ctx, "login", slog.Group("user", "id", "u1", "password", password("hunter2")))
