@@ -402,3 +402,13 @@ func TestErrorSerializationThroughTheBridge(t *testing.T) {
 	r := onlyRecord(t, records())
 	assertJSON(t, []any{r["error.type"], r["error.message"]}, `["*fmt.wrapError", "dial: refused"]`)
 }
+
+func TestRedactionThroughTheBridge(t *testing.T) {
+	zapLogger, records := jsonLogger(t, zapcore.DebugLevel)
+	l := slog.New(logger.NewRedactHandler(NewHandler(zapLogger, WithCaller(false))))
+
+	l.With("token", "t0k3n").Info("login", slog.Group("req", "authorization", "Bearer x", "path", "/login"))
+
+	r := onlyRecord(t, records())
+	assertJSON(t, []any{r["token"], r["req"]}, `["[REDACTED]", {"authorization": "[REDACTED]", "path": "/login"}]`)
+}
