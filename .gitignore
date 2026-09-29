@@ -29,3 +29,7 @@ go.work.sum
 
 # Graphify generated artifacts
 graphify-out/
+
+# Python bytecode (e.g. from .github/scripts)
+__pycache__/
+*.pyc

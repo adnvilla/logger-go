@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Apply Phase 0 backlog hygiene and assign later phases to milestones.
+"""Apply backlog hygiene and the phased roadmap (Phases 0-5) to milestones.
 
 Idempotent: safe to re-run. Comments are tagged with <!-- backlog-phase-plan -->.
 """
@@ -69,24 +69,25 @@ def upsert_label(name: str, color: str, description: str):
     print(f"created label {name}")
 
 
-def upsert_milestone(title: str, description: str, state: str = "open") -> int:
+def upsert_milestone(title: str, description: str, state: str | None = None) -> int:
+    """Create or update a milestone. State is only changed when given, so
+    re-running never reopens a phase that was closed after completion."""
     existing = {
         item["title"]: item
         for item in list_all("/milestones?state=all")
     }
     if title in existing:
         number = existing[title]["number"]
-        request(
-            "PATCH",
-            f"/milestones/{number}",
-            {"title": title, "description": description, "state": state},
-        )
+        payload = {"title": title, "description": description}
+        if state:
+            payload["state"] = state
+        request("PATCH", f"/milestones/{number}", payload)
         print(f"updated milestone {title} #{number}")
         return number
     created = request(
         "POST",
         "/milestones",
-        {"title": title, "description": description, "state": state},
+        {"title": title, "description": description, "state": state or "open"},
     )
     print(f"created milestone {title} #{created['number']}")
     return created["number"]
@@ -119,27 +120,31 @@ def main():
     upsert_label("priority: P0", "b60205", "Highest priority; blocks other work")
     upsert_label("priority: P1", "d93f0b", "Next after P0")
     upsert_label("priority: P2", "fbca04", "Product/docs after the core contract is stable")
+    upsert_label("rollout", "0e8a16", "Release, migration and service adoption work")
 
     phase0 = upsert_milestone(
         "Phase 0 — Backlog hygiene",
         "Close completed baseline work, rescope docs, add priority labels, and place later work on phase milestones.",
-        state="open",
     )
     phase1 = upsert_milestone(
         "Phase 1 — Zap backend decision",
-        "Decide whether to keep the custom Zap handler, adopt an existing adapter such as zap/exp/zapslog, extract Zap to a separate module, or drop Zap. Record the decision in an ADR on #12 before rewriting zap/zap_logger.go. This gates #7, #8, and #9.",
+        "Decision (#12): stop owning a custom slog.Handler for Zap. Delegate to go.uber.org/zap/exp/zapslog (the only adapter that passed the full slog contract evaluation, and the fastest), treat Zap as a migration bridge in its own module, and make logger-go the shared observability-schema layer. Also inventory consumers and log-dependent dashboards (#18) before any output-changing release. Gates Phase 2.",
     )
     phase2 = upsert_milestone(
         "Phase 2 — slog handler contract",
-        "Fix or replace the Zap bridge so it honors the slog.Handler contract: consistent custom levels (#8), groups/empty attrs/LogValuer (#7), and record time/source (#9). Each PR adds Phase 2 regression tests from #13 without golden-izing known defects.",
+        "Delegate the Zap bridge to zapslog (#19), which closes #7 and #8 and most of #9. Report the real call site from the level helpers (#20, closes the rest of #9). Move Zap into its own Go module (#21). Output changes: release only after migration notes (#22) and the inventory (#18). Rollout: the pilot service (#28) adopts this release first.",
     )
     phase3 = upsert_milestone(
         "Phase 3 — configuration API",
-        "Separate process-wide default configuration from context storage (#10). Prefer a v1-compatible deprecation path (SetDefault vs WithContext/FromContext). FromContext must never return a typed nil logger.",
+        "Separate process-wide default configuration from context storage (#10) with a v1-compatible deprecation path; FromContext must never return a typed nil logger. Add context attributes plus a handler middleware (#23) as the recommended pattern over storing loggers in context. Additive release; the pilot (#28) adopts it first.",
     )
     phase4 = upsert_milestone(
         "Phase 4 — observability schema",
-        "Define the production JSON schema and correlation fields (#11), then document logs vs traces vs metrics honestly (#14). Do not present Prometheus as a log ingestion backend. Land after the handler output is stable.",
+        "Define the vendor-neutral production JSON schema (#11) and implement it as backend-agnostic handler middleware: trace/span correlation (#24), redaction (#25), error serialization (#26), and a NewProduction factory (#27). Document logs vs traces vs metrics honestly (#14). The pilot (#28) validates the schema before fleet rollout.",
+    )
+    phase5 = upsert_milestone(
+        "Phase 5 — Rollout",
+        "Adopt each release in a pilot service first (#28, a running track that starts with the Phase 2 release), publish the service adoption guide (#29), then migrate the remaining services in waves and retire deprecated v1 APIs only in v2 (#30).",
     )
 
     issue14 = request("GET", "/issues/14")
@@ -164,7 +169,6 @@ def main():
         body=issue14_body,
         milestone=phase4,
         labels=["documentation", "priority: P2"],
-        state="open",
     )
     ensure_comment(
         14,
@@ -185,7 +189,6 @@ Blocked on / should land with #11.""",
         13,
         milestone=phase0,
         labels=["enhancement"],
-        state="open",
     )
     ensure_comment(
         13,
@@ -211,17 +214,34 @@ Closing this tracker so implementation continues under the phase milestones.""",
             12,
             phase1,
             ["question", "priority: P0"],
-            """## Phase 1
+            """## Phase 1 — decision
 
-Assigned to **Phase 1 — Zap backend decision**.
+**Decision:** stop owning a custom `slog.Handler` for Zap. Delegate to `go.uber.org/zap/exp/zapslog`, treat Zap as a migration bridge in its own module, and make `logger-go` the shared observability-schema layer.
 
-This ADR is the gate for #7, #8, and #9. Do not rewrite the custom Zap handler until this issue records whether we:
+Evidence from a side-by-side evaluation (17 behaviour cases plus benchmarks):
 
-1. adopt an existing adapter (for example `go.uber.org/zap/exp/zapslog`) and optionally extract Zap to a separate module,
-2. keep and fully own the custom handler, or
-3. drop Zap after migrating callers to native slog.
+| | custom handler | zapslog | samber/slog-zap |
+|---|---|---|---|
+| slog contract (groups, `LogValuer`, empty attrs, levels, time, caller) | fails 8/11 core cases; leaks `LogValuer` secrets | passes all | fails levels and sibling groups (records written under the wrong group); nondeterministic field order |
+| Log with 3 attrs and a group | ~1.6 µs, 7 allocs | **~1.2 µs, 5 allocs** | ~3.5 µs, 25 allocs |
+| Disabled level | 9 ns | 9 ns | ~1.3 µs (ignores the Zap core level) |
+| Maintenance | ours | exp v0.3.0 (Oct 2024); fallback: vendor ~200 LOC (MIT) | active v2 |
 
-Follow-up implementation issues, if needed, belong in Phase 2.""",
+The native `slog.JSONHandler` (~0.9 µs, 3 allocs) beat every slog→Zap bridge, so Zap stays a migration bridge, not the target backend.
+
+Follow-ups:
+
+- Phase 1: #18 (consumer inventory, rollout gate)
+- Phase 2: #19 (delegate to zapslog), #20 (helper call site), #21 (separate Zap module), #22 (migration notes)
+- Phase 3: #10, #23 (context attributes middleware)
+- Phase 4: #11 with #24, #25, #26, #27; #14
+- Phase 5: #28 (pilot), #29 (adoption guide), #30 (fleet migration)""",
+        ),
+        (
+            18,
+            phase1,
+            ["rollout", "priority: P0"],
+            None,
         ),
         (
             8,
@@ -231,7 +251,7 @@ Follow-up implementation issues, if needed, belong in Phase 2.""",
 
 Assigned to **Phase 2 — slog handler contract**.
 
-Highest-severity Zap bug: `Enabled` and `Handle` must use one level-conversion policy so accepted records are not silently dropped. Wait for the Phase 1 decision on #12 before a large rewrite; if #12 keeps the custom handler, implement this first.""",
+Resolved by delegating to `zapslog` (#19). It uses one range-based level conversion for both `Enabled` and `Handle`. #19 must add the custom-level regression tests listed here and fix the incorrect `slog.Level(50)` test description.""",
         ),
         (
             7,
@@ -241,7 +261,7 @@ Highest-severity Zap bug: `Enabled` and `Handle` must use one level-conversion p
 
 Assigned to **Phase 2 — slog handler contract**.
 
-`WithGroup` currently changes the Zap logger name instead of nesting attributes. Tests must assert structured fields, not `LoggerName`. Depends on the Phase 1 decision in #12.""",
+Resolved by delegating to `zapslog` (#19). It nests groups, inlines empty-key groups, skips empty attributes and resolves `LogValuer`. Tests must assert structured fields, not `LoggerName`. This changes emitted JSON, so the release waits for #18 and #22.""",
         ),
         (
             9,
@@ -251,8 +271,12 @@ Assigned to **Phase 2 — slog handler contract**.
 
 Assigned to **Phase 2 — slog handler contract**.
 
-Preserve `slog.Record` time and source metadata. Do this after #8 and #7 (or as part of adopting an adapter chosen in #12).""",
+`Record.Time` and `Record.PC` are honoured by `zapslog` (#19). The helper call site is fixed by #20. Both must ship in the same release, because the current `CallerSkip(4)` only works with the old helper path.""",
         ),
+        (19, phase2, ["enhancement", "priority: P0"], None),
+        (20, phase2, ["bug", "priority: P1"], None),
+        (21, phase2, ["enhancement", "priority: P1"], None),
+        (22, phase2, ["documentation", "rollout", "priority: P1"], None),
         (
             10,
             phase3,
@@ -261,8 +285,9 @@ Preserve `slog.Record` time and source metadata. Do this after #8 and #7 (or as 
 
 Assigned to **Phase 3 — configuration API**.
 
-Separate process-wide `slog.Default()` mutation from context storage. Prefer a v1-compatible path (new `SetDefault*` APIs, deprecate `SetLogger`) unless a v2 break is required. `FromContext` must not return a typed nil logger.""",
+Separate process-wide `slog.Default()` mutation from context storage. Prefer a v1-compatible path (new `SetDefault*` APIs, deprecate `SetLogger`) unless a v2 break is required. `FromContext` must not return a typed nil logger. Ships together with #23, the context-attributes middleware that becomes the recommended pattern. Removal of deprecated APIs is tracked in #30 (v2 only).""",
         ),
+        (23, phase3, ["enhancement", "priority: P1"], None),
         (
             11,
             phase4,
@@ -271,13 +296,21 @@ Separate process-wide `slog.Default()` mutation from context storage. Prefer a v
 
 Assigned to **Phase 4 — observability schema**.
 
-Define the vendor-neutral production JSON contract after handler output is stable (Phases 1–2). #14 documents the same scope without over-promising backends.""",
+This issue defines the vendor-neutral production JSON contract after handler output is stable (Phases 1–2). Implementation is split into sub-issues built as backend-agnostic handler middleware: #24 (trace/span correlation), #25 (redaction), #26 (error serialization), #27 (`NewProduction` factory). #14 documents the same scope without over-promising backends.""",
         ),
+        (24, phase4, ["enhancement", "priority: P2"], None),
+        (25, phase4, ["enhancement", "priority: P2"], None),
+        (26, phase4, ["enhancement", "priority: P2"], None),
+        (27, phase4, ["enhancement", "priority: P2"], None),
+        (28, phase5, ["rollout", "priority: P1"], None),
+        (29, phase5, ["documentation", "rollout", "priority: P2"], None),
+        (30, phase5, ["rollout", "priority: P2"], None),
     ]
 
     for number, milestone, labels, comment in assignments:
-        update_issue(number, milestone=milestone, labels=labels, state="open")
-        ensure_comment(number, comment)
+        update_issue(number, milestone=milestone, labels=labels)
+        if comment:
+            ensure_comment(number, comment)
 
     request("PATCH", f"/milestones/{phase0}", {"state": "closed"})
     print(f"closed milestone Phase 0 #{phase0}")
