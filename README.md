@@ -15,11 +15,15 @@ It keeps a logger inside a `context.Context`, exposes convenience helpers for th
 go get github.com/adnvilla/logger-go
 ```
 
-If you plan to use the Zap handler, also pull in Zap:
+The core module has no third-party dependencies. The Zap bridge is a separate
+module, so only services that use it pull in Zap:
 
 ```bash
-go get go.uber.org/zap
+go get github.com/adnvilla/logger-go/zap
 ```
+
+Both modules are released together with the same version (tags `vX.Y.Z` and
+`zap/vX.Y.Z`).
 
 ## Quick start
 
@@ -74,7 +78,7 @@ request context.
 
 ### Using the Zap handler
 
-The `zap` subpackage implements `slog.Handler`, which allows slog to write to Zap. This means you can continue using the familiar `zap.Logger` ecosystem while adopting `log/slog`.
+The `zap` module (`github.com/adnvilla/logger-go/zap`) implements `slog.Handler`, which allows slog to write to Zap. This means you can continue using the familiar `zap.Logger` ecosystem while adopting `log/slog`.
 
 ```go
 import (
@@ -97,7 +101,7 @@ func main() {
 }
 ```
 
-Refer to [`examples/zap`](examples/zap/main.go) for a runnable program that mirrors the snippet above.
+See [`ExampleNewHandler`](zap/example_test.go) for a runnable example.
 
 The bridge delegates to [`zapslog`](https://pkg.go.dev/go.uber.org/zap/exp/zapslog)
 and follows the full `slog.Handler` contract
@@ -147,7 +151,8 @@ zap.NewHandler(zapLogger,
 Run the tests with:
 
 ```bash
-go test -race -cover ./...
+go test -race -cover ./...                # core module
+(cd zap && go test -race -cover ./...)    # Zap bridge module
 ```
 
 The integration suite verifies that production JSON remains newline-delimited and
