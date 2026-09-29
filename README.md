@@ -99,6 +99,49 @@ func main() {
 
 Refer to [`examples/zap`](examples/zap/main.go) for a runnable program that mirrors the snippet above.
 
+The bridge delegates to [`zapslog`](https://pkg.go.dev/go.uber.org/zap/exp/zapslog)
+and follows the full `slog.Handler` contract
+(see [ADR 0001](docs/adr/0001-zap-backend-and-library-direction.md)):
+
+- `WithGroup` and `slog.Group` nest attributes; they never change the Zap logger name.
+- Empty attributes and empty groups are dropped, and empty-key groups are inlined.
+- `slog.LogValuer` values are resolved, so types can redact themselves.
+- The record time and the caller from `slog.Record` are preserved.
+
+```go
+type password string
+
+func (password) LogValue() slog.Value { return slog.StringValue("[REDACTED]") }
+
+log := slog.New(zap.NewHandler(zapLogger))
+log.WithGroup("request").Info("login", "user", "u1", "password", password("hunter2"))
+```
+
+```json
+{"level":"info","ts":"2026-09-29T00:00:00Z","caller":"app/main.go:42","msg":"login","request":{"user":"u1","password":"[REDACTED]"}}
+```
+
+Levels map by range, the same way for filtering and for emission:
+
+| slog level | Zap level |
+|---|---|
+| below `Info` | `Debug` |
+| `Info` up to below `Warn` | `Info` |
+| `Warn` up to below `Error` | `Warn` |
+| `Error` and above | `Error` |
+
+`NewHandler` writes through the logger's core, so the level, encoder, outputs,
+hooks, logger name and fields added with `zapLogger.With` still apply. Caller and
+stack-trace settings of the `zap.Logger` itself are not visible to the bridge.
+Configure them with options instead:
+
+```go
+zap.NewHandler(zapLogger,
+    zap.WithCaller(true),                  // default: true (printed when the encoder has a CallerKey)
+    zap.WithStacktraceAt(slog.LevelError), // default: Error; zap.WithoutStacktrace() disables it
+)
+```
+
 ## Testing
 
 Run the tests with:
